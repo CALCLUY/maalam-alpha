@@ -1,0 +1,3375 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  font-family:
+    "IBM Plex Sans Arabic", "Noto Sans Arabic", "Segoe UI", Tahoma, ui-sans-serif, system-ui,
+    -apple-system, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+[dir="auto"] {
+  unicode-bidi: plaintext;
+}
+
+textarea,
+input {
+  text-align: start;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #090a0c;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: rgba(109, 124, 255, 0.35);
+  color: white;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #292b31;
+  background-clip: padding-box;
+}
+
+.setup-screen::before {
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 72px 72px;
+  content: "";
+  mask-image: linear-gradient(to bottom, black, transparent 76%);
+  pointer-events: none;
+}
+
+.ambient {
+  position: fixed;
+  border-radius: 999px;
+  filter: blur(120px);
+  opacity: 0.16;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.ambient-one {
+  top: 9%;
+  right: 4%;
+  width: 30rem;
+  height: 30rem;
+  background: #4054ff;
+  animation: ambient-drift 14s ease-in-out infinite alternate;
+}
+
+.ambient-two {
+  bottom: -20%;
+  left: -8%;
+  width: 34rem;
+  height: 34rem;
+  background: #1a78b7;
+  opacity: 0.08;
+  animation: ambient-drift 18s ease-in-out -6s infinite alternate-reverse;
+}
+
+.vox-logo {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 28%;
+  background:
+    radial-gradient(circle at 25% 10%, rgba(255, 255, 255, 0.4), transparent 30%),
+    linear-gradient(145deg, #7b87ff 0%, #5364ed 48%, #3442ba 100%);
+  box-shadow:
+    0 10px 32px rgba(58, 75, 224, 0.22),
+    inset 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.vox-logo::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 20%, rgba(255, 255, 255, 0.18), transparent 65%);
+  content: "";
+  transform: translateX(-130%);
+  animation: logo-sheen 6s ease-in-out infinite;
+}
+
+.vox-logo span {
+  z-index: 1;
+  width: 3px;
+  border-radius: 999px;
+  background: white;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.35);
+}
+
+.setup-enter {
+  animation: setup-enter 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.key-field {
+  display: flex;
+  height: 3.5rem;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.045);
+  padding: 0 0.75rem 0 1rem;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+
+.key-field:focus-within {
+  border-color: rgba(122, 136, 255, 0.72);
+  background: rgba(255, 255, 255, 0.058);
+  box-shadow: 0 0 0 3px rgba(88, 105, 255, 0.13);
+}
+
+.key-field.has-error {
+  border-color: rgba(248, 113, 113, 0.52);
+}
+
+.icon-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.65rem;
+  color: #a1a1aa;
+  transition:
+    color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.icon-button:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: white;
+}
+
+.icon-button:active {
+  transform: scale(0.95);
+}
+
+.connect-button {
+  display: flex;
+  height: 3.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  border-radius: 0.9rem;
+  background: #f4f4f5;
+  color: #111216;
+  font-size: 0.875rem;
+  font-weight: 650;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+  transition:
+    transform 180ms ease,
+    background 180ms ease,
+    opacity 180ms ease;
+}
+
+.connect-button:hover:not(:disabled) {
+  background: white;
+  transform: translateY(-1px);
+}
+
+.connect-button:active:not(:disabled) {
+  transform: translateY(0) scale(0.995);
+}
+
+.connect-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.button-spinner {
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+  border-top-color: #111216;
+  border-radius: 999px;
+  animation: spin 700ms linear infinite;
+}
+
+.chat-shell {
+  background:
+    radial-gradient(circle at 50% 18%, rgba(62, 76, 182, 0.07), transparent 34rem),
+    #090a0c;
+}
+
+.chat-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  background: rgba(9, 10, 12, 0.78);
+  backdrop-filter: blur(18px);
+}
+
+.header-button {
+  display: inline-flex;
+  height: 2.25rem;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 0.65rem;
+  padding: 0 0.65rem;
+  color: #a1a1aa;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition:
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.header-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.055);
+  color: #f4f4f5;
+}
+
+.header-button:disabled {
+  cursor: wait;
+  opacity: 0.45;
+}
+
+.header-button.is-on {
+  border: 1px solid rgba(123, 136, 255, 0.28);
+  background: rgba(99, 112, 240, 0.12);
+  color: #c3caff;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #52525b;
+}
+
+.status-dot.is-ready {
+  background: #34d399;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.6);
+}
+
+.status-dot.is-loading {
+  background: #fbbf24;
+  animation: caret-blink 1s steps(1) infinite;
+}
+
+.status-dot.is-error {
+  background: #71717a;
+}
+
+.doda-card {
+  border: 1px solid rgba(123, 136, 255, 0.16);
+  border-radius: 0.9rem;
+  background: rgba(99, 112, 240, 0.06);
+  padding: 0.9rem 1rem;
+}
+
+.ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(123, 136, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(99, 112, 240, 0.1);
+  padding: 0.15rem 0.55rem;
+  color: #a3aeff;
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.chat-glow {
+  position: fixed;
+  top: 10rem;
+  left: 50%;
+  width: 36rem;
+  height: 20rem;
+  border-radius: 50%;
+  background: rgba(72, 84, 207, 0.05);
+  filter: blur(100px);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.voice-orb {
+  position: relative;
+  display: flex;
+  width: 7.5rem;
+  height: 7.5rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.voice-orb-ring {
+  position: absolute;
+  border: 1px solid rgba(123, 136, 255, 0.14);
+  border-radius: 50%;
+}
+
+.voice-orb .ring-one {
+  inset: 0;
+  animation: orb-breathe 4s ease-in-out infinite;
+}
+
+.voice-orb .ring-two {
+  inset: 0.8rem;
+  border-color: rgba(123, 136, 255, 0.2);
+  animation: orb-breathe 4s ease-in-out -1.2s infinite;
+}
+
+.voice-orb-core {
+  position: relative;
+  display: flex;
+  width: 4.6rem;
+  height: 4.6rem;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.3), transparent 27%),
+    linear-gradient(145deg, #6e7aff, #3948bc);
+  box-shadow:
+    0 18px 65px rgba(69, 83, 216, 0.28),
+    inset 0 1px rgba(255, 255, 255, 0.16);
+  animation: orb-float 5s ease-in-out infinite;
+}
+
+.voice-orb-core::after {
+  position: absolute;
+  inset: -40%;
+  background: conic-gradient(transparent, rgba(255, 255, 255, 0.15), transparent 30%);
+  content: "";
+  animation: orb-rotate 7s linear infinite;
+}
+
+.voice-orb-core span {
+  z-index: 1;
+  width: 3px;
+  height: 0.8rem;
+  border-radius: 999px;
+  background: white;
+  animation: wave-idle 1.8s ease-in-out infinite;
+}
+
+.voice-orb-core span:nth-child(2),
+.voice-orb-core span:nth-child(4) {
+  animation-delay: -0.3s;
+}
+
+.voice-orb-core span:nth-child(3) {
+  animation-delay: -0.6s;
+}
+
+.voice-orb.is-active .voice-orb-core span {
+  animation: wave-active 650ms ease-in-out infinite alternate;
+}
+
+.voice-orb.is-active .voice-orb-core span:nth-child(2),
+.voice-orb.is-active .voice-orb-core span:nth-child(4) {
+  animation-delay: -220ms;
+}
+
+.voice-orb.is-active .voice-orb-core span:nth-child(3) {
+  animation-delay: -420ms;
+}
+
+.empty-enter {
+  animation: empty-enter 650ms 80ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.message-enter {
+  animation: message-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.thinking-bars {
+  display: inline-flex;
+  height: 1.5rem;
+  align-items: center;
+  gap: 4px;
+}
+
+.thinking-bars span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #7c88ff;
+  animation: thinking 1.1s ease-in-out infinite;
+}
+
+.thinking-bars span:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.thinking-bars span:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+.streaming-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 3px;
+  border-radius: 2px;
+  background: #7b87ff;
+  vertical-align: -0.12em;
+  animation: caret-blink 900ms steps(1) infinite;
+}
+
+.replay-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 0.55rem;
+  color: #71717a;
+  font-size: 0.7rem;
+  font-weight: 500;
+  transition:
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.replay-button:hover {
+  color: #b8c0ff;
+}
+
+.replay-button:active {
+  transform: scale(0.97);
+}
+
+.composer-area {
+  flex-shrink: 0;
+  background: linear-gradient(to top, #090a0c 74%, rgba(9, 10, 12, 0));
+}
+
+.composer-wrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 1.1rem;
+  background: rgba(24, 25, 30, 0.94);
+  padding: 0.25rem;
+  box-shadow:
+    0 14px 50px rgba(0, 0, 0, 0.28),
+    inset 0 1px rgba(255, 255, 255, 0.025);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.composer-wrap:focus-within {
+  border-color: rgba(125, 139, 255, 0.34);
+  box-shadow:
+    0 14px 50px rgba(0, 0, 0, 0.3),
+    0 0 0 3px rgba(89, 104, 229, 0.07);
+}
+
+.send-button {
+  display: inline-flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.8rem;
+  background: #6675f2;
+  color: white;
+  box-shadow: 0 8px 24px rgba(72, 89, 224, 0.22);
+  transition:
+    transform 160ms ease,
+    background 160ms ease,
+    opacity 160ms ease;
+}
+
+.send-button:hover:not(:disabled) {
+  background: #7886ff;
+  transform: translateY(-1px);
+}
+
+.send-button:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.send-button:disabled {
+  cursor: not-allowed;
+  background: #2d3038;
+  color: #666973;
+  box-shadow: none;
+}
+
+/* "كمّل" — continue the explanation. Secondary action beside Send. */
+.continue-button {
+  display: inline-flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0;
+  color: #c8c9d4;
+  transition:
+    transform 160ms ease,
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease;
+}
+
+.continue-button:hover:not(:disabled) {
+  border-color: rgba(102, 117, 242, 0.55);
+  background: rgba(102, 117, 242, 0.18);
+  color: #cdd3ff;
+  transform: translateY(-1px);
+}
+
+.continue-button:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.continue-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(89, 104, 229, 0.35);
+}
+
+.continue-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+  color: #666973;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.connection-banner {
+  min-height: 2.5rem;
+  border: 1px solid rgba(251, 191, 36, 0.14);
+  border-radius: 0.8rem;
+  background: rgba(120, 78, 12, 0.13);
+  padding: 0.55rem 0.75rem;
+  backdrop-filter: blur(12px);
+}
+
+.banner-action {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.35rem;
+  color: #fcd34d;
+  font-size: 0.7rem;
+  font-weight: 600;
+  transition: color 150ms ease;
+}
+
+.banner-action:hover {
+  color: #fef3c7;
+}
+
+.attach-button {
+  display: inline-flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.8rem;
+  color: #9a9aa6;
+  transition:
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.attach-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: #dfe3ff;
+}
+
+.attach-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.upload-card {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  border: 1px dashed rgba(123, 136, 255, 0.35);
+  border-radius: 0.9rem;
+  background: rgba(99, 112, 240, 0.06);
+  padding: 0.9rem 1rem;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease;
+}
+
+.upload-card:hover:not(:disabled) {
+  border-color: rgba(139, 150, 255, 0.7);
+  background: rgba(99, 112, 240, 0.11);
+}
+
+.upload-card:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.upload-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.upload-card strong {
+  display: block;
+  color: #e4e6ff;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.upload-card small {
+  display: block;
+  margin-top: 0.2rem;
+  color: #8f93a8;
+  font-size: 0.72rem;
+  line-height: 1.8;
+}
+
+.upload-card-icon {
+  display: inline-flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  background: rgba(102, 117, 242, 0.18);
+  color: #b8c0ff;
+}
+
+/* Upload choices and live camera. This modal is an interaction surface, not a
+   second layout plane; the lesson behind it stays exactly where it was. */
+.media-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(4, 7, 10, 0.78);
+  backdrop-filter: blur(10px);
+}
+
+.media-picker {
+  width: min(100%, 27rem);
+  max-height: min(88dvh, 38rem);
+  overflow-y: auto;
+  border: 1px solid rgba(164, 175, 255, 0.25);
+  border-radius: 1.2rem;
+  background: #17191e;
+  padding: 1.25rem;
+  color: #f4f4f5;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.55);
+}
+
+.media-picker-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.05rem;
+}
+
+.media-picker-kicker {
+  margin: 0 0 0.2rem;
+  color: #aab4ff;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.media-picker-heading h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.media-picker-close {
+  display: grid;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 0.6rem;
+  color: #a1a1aa;
+}
+
+.media-picker-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.media-picker-actions {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.media-picker-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  width: 100%;
+  border-radius: 0.8rem;
+  padding: 0.75rem;
+  text-align: start;
+  color: #aab4ff;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.media-picker-choice:hover:not(:disabled),
+.media-picker-choice:focus-visible {
+  background: rgba(137, 150, 255, 0.12);
+  color: #d1d8ff;
+}
+
+.media-picker-choice:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.media-picker-choice strong,
+.media-picker-choice small {
+  display: block;
+}
+
+.media-picker-choice strong {
+  color: #f4f4f5;
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+.media-picker-choice small {
+  margin-top: 0.14rem;
+  color: #9599a8;
+  font-size: 0.7rem;
+}
+
+.media-picker-hint {
+  margin: 0.75rem 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 0.75rem;
+  color: #9295a4;
+  font-size: 0.74rem;
+  line-height: 1.6;
+}
+
+.media-camera video {
+  display: block;
+  width: 100%;
+  max-height: 47dvh;
+  aspect-ratio: 4 / 3;
+  border-radius: 0.75rem;
+  background: #090a0c;
+  object-fit: contain;
+}
+
+.media-camera-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.media-picker-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 2.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.7rem;
+  padding: 0.3rem 0.8rem;
+  color: #d4d4d8;
+  font-size: 0.82rem;
+}
+
+.media-picker-action.is-primary {
+  flex: 1;
+  border-color: #7280ed;
+  background: #6474e9;
+  color: #fff;
+}
+
+.media-camera-fallback {
+  border-radius: 0.65rem;
+  background: rgba(251, 191, 36, 0.1);
+  padding: 0.55rem 0.7rem;
+  color: #fcdba0;
+  text-align: start;
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+
+.media-camera-fallback span {
+  display: block;
+  color: #fff;
+  font-weight: 700;
+}
+
+.media-input-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  max-height: 5rem;
+  overflow-y: auto;
+  margin: 0 0.35rem 0.45rem;
+  color: #c9ceff;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.message-image {
+  overflow: hidden;
+  width: min(14rem, 100%);
+  margin: 0 0 0.6rem;
+  border-radius: 0.65rem;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.message-image img {
+  display: block;
+  width: 100%;
+  max-height: 12rem;
+  object-fit: contain;
+}
+
+.message-image figcaption {
+  overflow: hidden;
+  padding: 0.3rem 0.45rem;
+  color: #b7bad2;
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-panel {
+  border: 1px solid rgba(123, 136, 255, 0.2);
+  border-radius: 0.85rem;
+  background: rgba(22, 23, 30, 0.95);
+  padding: 0.6rem 0.75rem;
+  backdrop-filter: blur(12px);
+}
+
+.doc-action {
+  min-height: 1.9rem;
+  border: 1px solid rgba(123, 136, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(99, 112, 240, 0.08);
+  padding: 0.2rem 0.75rem;
+  color: #c3caff;
+  font-size: 0.72rem;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease;
+}
+
+.doc-action:hover:not(:disabled) {
+  border-color: rgba(139, 150, 255, 0.6);
+  background: rgba(99, 112, 240, 0.18);
+}
+
+.doc-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+select.doc-action {
+  background-color: #15161d;
+}
+
+.doc-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.5rem 0.65rem;
+}
+
+.doc-spinner {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: none;
+  border: 2px solid rgba(139, 150, 255, 0.25);
+  border-top-color: #a3aeff;
+  border-radius: 999px;
+  animation: spin 800ms linear infinite;
+}
+
+/* Lesson coverage: progress through every point of the PDF. */
+.lesson-coverage {
+  margin-top: 0.6rem;
+  border-top: 1px dashed rgba(123, 136, 255, 0.22);
+  padding-top: 0.55rem;
+}
+
+.lesson-coverage-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.lesson-progress {
+  height: 0.4rem;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.lesson-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6675f2, #8b96ff);
+  transition: width 400ms ease;
+}
+
+.lesson-progress-label {
+  flex: none;
+  color: #a3aeff;
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.lesson-plan-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  color: #8b96ff;
+  font-size: 0.68rem;
+  transition: background 160ms ease;
+}
+
+.lesson-plan-toggle:hover {
+  background: rgba(99, 112, 240, 0.14);
+}
+
+.lesson-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 11rem;
+  overflow-y: auto;
+}
+
+.lesson-plan-item {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  gap: 0.45rem;
+  border-radius: 0.5rem;
+  padding: 0.28rem 0.45rem;
+  color: #b9bcc9;
+  font-size: 0.72rem;
+  text-align: start;
+  transition: background 160ms ease;
+}
+
+.lesson-plan-item:hover:not(:disabled) {
+  background: rgba(99, 112, 240, 0.12);
+}
+
+.lesson-plan-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.lesson-plan-status {
+  flex: none;
+  width: 1rem;
+  text-align: center;
+  color: #666973;
+}
+
+.lesson-plan-item.is-covered {
+  color: #6f7382;
+}
+
+.lesson-plan-item.is-covered .lesson-plan-status {
+  color: #4ade80;
+}
+
+.lesson-plan-item.is-covered .lesson-plan-title {
+  text-decoration: line-through;
+  text-decoration-color: rgba(74, 222, 128, 0.4);
+}
+
+.lesson-plan-item.is-current {
+  background: rgba(99, 112, 240, 0.12);
+  color: #e2e5ff;
+}
+
+.lesson-plan-item.is-current .lesson-plan-status {
+  color: #fcd34d;
+}
+
+.lesson-plan-index {
+  flex: none;
+  color: #666973;
+  font-size: 0.65rem;
+}
+
+.lesson-plan-title {
+  min-width: 0;
+  flex: 1;
+}
+
+.lesson-plan-pages {
+  flex: none;
+  color: #666973;
+  font-size: 0.62rem;
+}
+
+.doc-action-next {
+  border-color: rgba(252, 211, 77, 0.4);
+  background: rgba(252, 211, 77, 0.1);
+  color: #fcd34d;
+  font-weight: 700;
+}
+
+.doc-action-next:hover:not(:disabled) {
+  border-color: rgba(252, 211, 77, 0.7);
+  background: rgba(252, 211, 77, 0.18);
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 0.75rem;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  border: 2px dashed rgba(139, 150, 255, 0.7);
+  border-radius: 1.25rem;
+  background: rgba(9, 10, 12, 0.88);
+  color: #c3caff;
+  font-size: 0.9rem;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+
+.teaching-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2rem;
+  padding: 0.25rem 0;
+  color: #adb7ff;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: color 160ms ease;
+}
+
+.teaching-trigger:hover {
+  color: #e0e4ff;
+}
+
+.teaching-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+  padding: 0.2rem 0.2rem 0.35rem;
+}
+
+.learning-action-select {
+  max-width: 100%;
+  min-height: 2rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.4rem;
+  background: #111216;
+  color: #b4b4c0;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.learning-action-select:disabled {
+  color: #64646e;
+  cursor: not-allowed;
+}
+
+.teaching-dialog {
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid #343640;
+  border-radius: 1.25rem;
+  background: #111216;
+  color: #e4e4e7;
+  box-shadow: 0 28px 100px rgba(0, 0, 0, 0.5);
+}
+
+.teaching-dialog[open] {
+  animation: message-enter 220ms ease-out both;
+}
+
+.teaching-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.teaching-dialog-body {
+  padding: clamp(1.15rem, 4vw, 2rem);
+}
+
+.teaching-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.75rem 0 0.25rem;
+  cursor: pointer;
+}
+
+.teaching-choice input {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.25rem;
+  accent-color: #8b96ff;
+}
+
+.teaching-choice strong {
+  display: block;
+  color: #dedee6;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.teaching-choice small {
+  display: block;
+  margin-top: 0.15rem;
+  color: #92929f;
+  font-size: 0.75rem;
+  line-height: 1.8;
+}
+
+.teaching-select {
+  min-height: 2.8rem;
+  border: 1px solid #3d3e49;
+  border-radius: 0.6rem;
+  background: #1b1c23;
+  padding: 0.45rem 0.7rem;
+  color: #e1e1e7;
+  font-size: 0.8rem;
+}
+
+.teaching-cycle {
+  margin-top: 1.5rem;
+  padding-block: 1rem;
+  padding-inline-start: 1.25rem;
+  border-top: 1px solid #2b2d35;
+  border-bottom: 1px solid #2b2d35;
+  list-style: decimal;
+}
+
+.teaching-cycle li {
+  padding-block: 0.25rem;
+  padding-inline-start: 0.3rem;
+  color: #9999a6;
+  font-size: 0.77rem;
+  line-height: 1.9;
+}
+
+.teaching-cycle li::marker {
+  color: #8995eb;
+  font-size: 0.65rem;
+}
+
+.teaching-cycle strong {
+  color: #d8d8e1;
+  font-weight: 500;
+}
+
+.teaching-evidence {
+  margin-top: 1rem;
+}
+
+.teaching-evidence summary {
+  width: fit-content;
+  color: #adb7ff;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.teaching-sources li {
+  padding-block: 0.65rem;
+  border-bottom: 1px solid #262830;
+}
+
+.teaching-sources a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: #c4cafe;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.teaching-sources a:hover {
+  color: white;
+}
+
+.teaching-sources small {
+  display: block;
+  margin-top: 0.2rem;
+  color: #8d8d9a;
+  font-size: 0.67rem;
+}
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+summary:focus-visible,
+input[type="radio"]:focus-visible {
+  outline: 2px solid #a3aeff;
+  outline-offset: 4px;
+}
+
+@keyframes setup-enter {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes empty-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ambient-drift {
+  from {
+    transform: translate3d(-2%, -3%, 0) scale(0.96);
+  }
+  to {
+    transform: translate3d(8%, 7%, 0) scale(1.07);
+  }
+}
+
+@keyframes logo-sheen {
+  0%,
+  62% {
+    transform: translateX(-130%);
+  }
+  82%,
+  100% {
+    transform: translateX(130%);
+  }
+}
+
+@keyframes orb-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes orb-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes orb-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes wave-idle {
+  0%,
+  100% {
+    height: 0.55rem;
+  }
+  50% {
+    height: 1.2rem;
+  }
+}
+
+@keyframes wave-active {
+  from {
+    height: 0.45rem;
+  }
+  to {
+    height: 1.65rem;
+  }
+}
+
+@keyframes thinking {
+  0%,
+  70%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+/* ------------------------------------------------------------------------ */
+/* Blackboard (3-zone board): #264941, 2:1 ratio, handwritten typography    */
+/* Arabic: 'Playpen Sans Arabic', French/Latin: 'Caveat' / 'Playpen Sans'   */
+/* ------------------------------------------------------------------------ */
+
+.board-wrap {
+  position: relative;
+  z-index: 15;
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 82rem;
+  margin: 0 auto;
+  padding: 0.5rem 1rem 0;
+}
+
+.board-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.2rem 0.25rem 0.45rem;
+}
+
+.board-topbar-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #c9ede0;
+  letter-spacing: 0.01em;
+}
+
+.board-chalk-badge {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(255, 231, 146, 0.15);
+  color: #ffe792;
+  border: 1px dashed rgba(255, 231, 146, 0.4);
+}
+
+.board-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.board-mini-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.32rem 0.75rem;
+  font-size: 0.7rem;
+  color: #e5f2ed;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.board-mini-button:hover {
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.board-mini-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* Light spinner for the dark board topbar (the default one is dark-on-light). */
+.board-mini-button .button-spinner {
+  width: 0.8rem;
+  height: 0.8rem;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+}
+
+.board-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  min-height: 230px;
+  max-height: 64vh;
+  border-radius: 16px;
+  background: #264941;
+  border: 10px solid #4a3728;
+  box-shadow:
+    0 24px 52px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.board-zones {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 1.05fr 1px 1.4fr 1px 0.95fr;
+  direction: ltr;
+  height: 100%;
+}
+
+.board-divider {
+  align-self: stretch;
+  justify-self: center;
+  width: 1px;
+  margin: 14px 0;
+  background: repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.35) 0 6px, transparent 6px 13px);
+}
+
+.board-zone {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.85rem 0.95rem 0.75rem;
+  overflow: hidden;
+}
+
+.board-zone-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.55rem;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.26);
+  padding-bottom: 0.45rem;
+  flex-shrink: 0;
+}
+
+/* Handwritten font typography rules */
+.board-zone-title {
+  font-family: "Playpen Sans Arabic", "Playpen Sans", cursive, sans-serif;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #fdf7e6;
+}
+
+.board-zone-hint {
+  font-family: "Caveat", "Playpen Sans", "Patrick Hand", cursive, sans-serif;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: rgba(253, 247, 230, 0.62);
+  letter-spacing: 0.02em;
+}
+
+.board-zone-body {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
+  /* Generous gap: a sentence and the equation under it must never read as one
+     glued-together line, the way a real board keeps them apart. */
+  gap: 0.85rem;
+  padding-inline-end: 0.25rem;
+}
+
+.board-zone-body::-webkit-scrollbar {
+  display: none;
+  width: 0;
+}
+
+.board-zone-empty {
+  font-family: "Caveat", "Playpen Sans Arabic", cursive;
+  font-size: 0.85rem;
+  color: rgba(253, 247, 230, 0.38);
+  font-style: italic;
+}
+
+.board-block {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+/* Font assignment for Arabic vs Latin/French in the blackboard */
+.board-arabic {
+  font-family: "Playpen Sans Arabic", "Playpen Sans", cursive, sans-serif;
+  font-weight: 500;
+}
+
+.board-latin,
+.font-chalk-hand {
+  font-family: "Caveat", "Playpen Sans", "Patrick Hand", "Kalam", cursive, sans-serif;
+  font-size: 1.08em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.board-heading {
+  margin: 0;
+  font-family: "Playpen Sans Arabic", "Caveat", "Playpen Sans", cursive, sans-serif;
+  font-weight: 700;
+  font-size: 1.08rem;
+  line-height: 1.45;
+}
+
+.board-text {
+  margin: 0;
+  font-family: "Playpen Sans Arabic", "Caveat", "Playpen Sans", cursive, sans-serif;
+  white-space: pre-wrap;
+}
+
+.board-list {
+  margin: 0;
+  padding-inline-start: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.32rem;
+  font-family: "Playpen Sans Arabic", "Caveat", "Playpen Sans", cursive, sans-serif;
+}
+
+.board-list li {
+  line-height: 1.55;
+}
+
+/* Chalk Colors: crisp matte chalk, NO glow or text-shadow */
+.chalk-white {
+  color: #fdf7e6;
+}
+
+.chalk-yellow {
+  color: #ffe066;
+}
+
+.chalk-red {
+  color: #ff5b61;
+}
+
+.board-block-large {
+  font-size: 1.15rem;
+}
+
+.board-block-large .board-heading {
+  font-size: 1.28rem;
+}
+
+.board-block-underline {
+  text-decoration: underline;
+  text-decoration-style: solid;
+  text-underline-offset: 4px;
+}
+
+.board-block-boxed {
+  position: relative;
+  padding: 0.55rem 0.75rem;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  overflow: visible;
+}
+
+/* KaTeX in Chalkboard style (crisp, no glow) */
+.board-latex {
+  font-size: 1.05rem;
+  overflow-x: auto;
+  padding: 0.15rem 0;
+}
+
+.board-latex .katex {
+  color: inherit;
+}
+
+.board-latex .katex-display {
+  margin: 0.3rem 0;
+}
+
+.board-latex-inline {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 0.3em;
+}
+
+.board-latex-inline .katex {
+  color: inherit;
+}
+
+.board-svg {
+  width: 100%;
+  margin: 0.25rem 0;
+}
+
+.board-svg svg {
+  width: 100%;
+  height: auto;
+  max-height: 160px;
+  color: inherit;
+}
+
+@media (max-width: 720px) {
+  /* The blackboard itself stays a fixed 20:9 slate — never stacks, never
+     reflows. Only the chrome around it (chat / composer) is responsive. */
+  .board-zones:not(.board-zones-merged) {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(140px, auto) 1px minmax(140px, auto) 1px minmax(140px, auto);
+    height: auto;
+    max-height: 64vh;
+    overflow-y: auto;
+  }
+
+  .board-zones:not(.board-zones-merged) .board-divider {
+    width: auto;
+    height: 1px;
+    margin: 0 14px;
+    align-self: center;
+    background: repeating-linear-gradient(to right, rgba(255, 255, 255, 0.35) 0 6px, transparent 6px 13px);
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Handwritten chalk typography (overrides)                                  */
+/* Caveat first: it has no Arabic glyphs, so the browser falls back per      */
+/* character to Playpen Sans Arabic for Arabic → French/Latin, digits and    */
+/* punctuation are always handwritten, Arabic stays in Playpen Sans Arabic.  */
+/* ------------------------------------------------------------------------ */
+.board-frame {
+  --chalk-latin: "Caveat", "Patrick Hand", "Kalam", "Playpen Sans Arabic", cursive;
+  --chalk-math: "Caveat", "Patrick Hand", "Kalam", KaTeX_Math, KaTeX_Main, "Times New Roman", serif;
+  font-family: var(--chalk-latin);
+}
+
+.board-text,
+.board-heading,
+.board-list,
+.board-block {
+  font-family: var(--chalk-latin);
+}
+
+.board-latin,
+.font-chalk-hand {
+  font-family: var(--chalk-latin);
+  font-size: 1.22em;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  line-height: 1.3;
+}
+
+.board-arabic {
+  font-family: "Playpen Sans Arabic", cursive, sans-serif;
+  font-size: 1em;
+}
+
+/* --- Handwritten LaTeX (KaTeX) ------------------------------------------ */
+.board-latex .katex,
+.board-latex-inline .katex {
+  font-family: var(--chalk-math) !important;
+  font-size: 1.45em;
+  font-weight: 600;
+}
+
+.board-latex .katex *,
+.board-latex-inline .katex * {
+  font-family: var(--chalk-math) !important;
+  font-style: normal !important;
+}
+
+/* Keep KaTeX's sized fonts for big operators & stretchy delimiters so layout stays correct */
+.board-latex .katex .op-symbol.small-op,
+.board-latex-inline .katex .op-symbol.small-op,
+.board-latex .katex .delimsizing.size1,
+.board-latex .katex .delim-size1 > span {
+  font-family: KaTeX_Size1 !important;
+}
+.board-latex .katex .op-symbol.large-op,
+.board-latex .katex .delimsizing.size2 {
+  font-family: KaTeX_Size2 !important;
+}
+.board-latex .katex .delimsizing.size3 {
+  font-family: KaTeX_Size3 !important;
+}
+.board-latex .katex .delimsizing.size4,
+.board-latex .katex .delim-size4 > span {
+  font-family: KaTeX_Size4 !important;
+}
+
+/* Chalk-like strokes for fraction bars, roots and overlines */
+.board-latex .katex .frac-line,
+.board-latex .katex .overline-line,
+.board-latex .katex .underline-line,
+.board-latex .katex .hline {
+  border-bottom-width: 0.08em !important;
+  border-color: currentColor !important;
+  opacity: 0.92;
+}
+
+.board-latex .katex svg {
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 12px;
+}
+
+/* Hide the screen-reader MathML copy from visual font rules (safety) */
+.board-latex .katex .katex-mathml * {
+  font-family: inherit !important;
+}
+
+/* Handwritten labels inside SVG diagrams / flowcharts */
+.board-svg svg text,
+.board-svg svg tspan {
+  font-family: var(--chalk-latin);
+  font-weight: 600;
+  fill: currentColor;
+  stroke: none;
+}
+
+/* Two-zone board: merged former left + middle, retaining middle's formal policy.
+   No visible divider or zone labels — the two areas are separated by spacing only. */
+.board-zones.board-zones-merged {
+  grid-template-columns: minmax(0, 2.35fr) minmax(0, 1fr);
+  gap: 0 2rem;
+}
+
+.board-zones.board-zones-merged .board-divider {
+  display: none;
+}
+
+.board-zone-formal {
+  padding-inline: 1.15rem;
+}
+
+@media (max-width: 720px) {
+  .board-zones.board-zones-merged {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(260px, auto) minmax(180px, auto);
+    gap: 1.5rem 0;
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Right zone: darija examples — smart colors, crisp matte chalk, no glow     */
+/* ------------------------------------------------------------------------ */
+.board-zone-right {
+  padding-inline-end: 1.05rem;
+}
+
+.board-example {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  padding-inline-start: 0.7rem;
+  border-inline-start: 2.5px solid rgba(253, 247, 230, 0.45);
+  margin-bottom: 0.5rem;
+}
+
+.board-example-title {
+  margin: 0;
+  text-align: left;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  color: #8ae3d6; /* subtle cyan structure label */
+}
+
+.board-example-label {
+  font-family: var(--chalk-latin);
+  font-weight: 700;
+}
+
+.board-example-concept {
+  font-family: var(--chalk-latin);
+  font-weight: 700;
+  color: #ffe066; /* accent yellow for the concept being exemplified */
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.board-example-body {
+  text-align: right;
+  font-size: 0.98rem;
+  line-height: 1.7;
+  color: #fdf7e6; /* crisp white chalk for the Darija example body */
+  margin: 0;
+}
+
+.board-example-body .board-arabic {
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Line-by-line chalk handwriting                                            */
+/* Each .chalk-hand-line writes itself, then the next line starts.           */
+/* ------------------------------------------------------------------------ */
+.chalk-hand-line {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow: visible;
+  white-space: nowrap;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+.chalk-hand-line.is-ltr {
+  margin-right: auto;
+  margin-left: 0;
+  text-align: left;
+  animation-name: chalk-line-ltr;
+}
+
+.chalk-hand-line.is-rtl {
+  margin-left: auto;
+  margin-right: 0;
+  text-align: right;
+  animation-name: chalk-line-rtl;
+}
+
+/* Negative vertical/side insets keep tall handwritten glyphs (the dot of "i",
+   superscripts, Caveat ascenders) visible — inset(0) clipped everything drawn
+   outside the line box. The horizontal edge animates smoothly like natural chalk. */
+@keyframes chalk-line-ltr {
+  0% {
+    clip-path: inset(-0.8em 100% -0.8em -0.4em);
+  }
+  100% {
+    clip-path: inset(-0.8em -0.5em -0.8em -0.4em);
+  }
+}
+
+@keyframes chalk-line-rtl {
+  0% {
+    clip-path: inset(-0.8em -0.4em -0.8em 100%);
+  }
+  100% {
+    clip-path: inset(-0.8em -0.4em -0.8em -0.5em);
+  }
+}
+
+/* Safety: KaTeX parse errors should never display as harsh dark red (#cc0000) */
+.katex-error {
+  color: inherit !important;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Chalk-drawn frame around boxed answers / formulas                          */
+/* The SVG stroke is sized to the exact measured box and draws itself.        */
+/* ------------------------------------------------------------------------ */
+.chalk-frame {
+  position: absolute;
+  inset: -2px;
+  pointer-events: none;
+}
+
+.chalk-frame-svg {
+  display: block;
+  overflow: visible;
+}
+
+.chalk-frame-stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  animation-name: chalk-frame-draw;
+  animation-fill-mode: forwards;
+  animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1);
+}
+
+@keyframes chalk-frame-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Final blackboard layout + role-based chalk hierarchy                     */
+/* ------------------------------------------------------------------------ */
+.board-frame {
+  aspect-ratio: 20 / 9;
+  min-height: 0;
+  max-height: none;
+  border: 0;
+  border-radius: 14px;
+  background: #264941;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34);
+}
+
+.board-zones.board-zones-merged {
+  grid-template-columns: minmax(0, 2.35fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0 1.6rem;
+  height: 100%;
+  overflow: hidden;
+}
+
+.board-zones.board-zones-merged .board-divider {
+  display: none;
+}
+
+.board-zone-body {
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+
+/* Titles: yellow, underlined, never framed. */
+.board-block.chalk-yellow {
+  color: #ffe066;
+}
+
+.board-heading,
+.board-heading .board-latin,
+.board-title-text {
+  color: #ffe066;
+}
+
+/* Objectives: plain white chalk bullets, no frame. */
+.board-block.chalk-white {
+  color: #fdf7e6;
+}
+
+.board-block-objective,
+.board-block-objective .board-list {
+  color: #fdf7e6;
+}
+
+/* Definitions: white wording with only the French term in title yellow; white frame. */
+.board-definition-term,
+.chalk-key-term {
+  color: #ffe066 !important;
+  font-weight: 700;
+}
+
+.board-definition-copy {
+  color: #fdf7e6;
+}
+
+.board-block-definition.board-block-boxed,
+.board-block-formula.board-block-boxed,
+.board-block-latex.board-block-boxed {
+  color: #fdf7e6;
+}
+
+/* Formulas inherit their block's chalk colour (white for steps, red for final
+   answers). Accent symbols keep their own contrasting colour, so a marked
+   variable is still visible even inside an all-red answer. */
+.board-latex .katex,
+.board-latex-inline .katex {
+  color: inherit;
+}
+
+.board-latex .katex .mord.textcolor,
+.board-latex .katex .mord.textcolor .mord,
+.board-latex .katex .mord.textcolor .mord.text {
+  color: var(--chalk-accent, #ff5b61) !important;
+}
+
+/* Examples: white body, yellow "Exemple de … :" label, and no box. */
+.board-block-example {
+  color: #fdf7e6;
+}
+
+.board-example-title,
+.board-example-label,
+.board-example-concept,
+.board-example-of,
+.board-example-colon {
+  color: #ffe066;
+}
+
+.board-example-body {
+  color: #fdf7e6;
+}
+
+/* Final answers / takeaways: single reserved red accent, framed and underlined. */
+.board-takeaway,
+.board-block-takeaway {
+  color: #ff5b61;
+}
+
+.board-block-takeaway.board-block-boxed {
+  color: #ff5b61;
+}
+
+/* Inside an all-red answer, the marked trap symbol flips to amber for contrast. */
+.board-block-takeaway {
+  --chalk-accent: #ffd166;
+}
+
+/* Formula and definition frames stay white; key takeaway frame is red. */
+.board-block-takeaway .chalk-frame {
+  color: #ff5b61 !important;
+}
+
+@media (max-width: 720px) {
+  .board-zones.board-zones-merged {
+    grid-template-columns: minmax(0, 2.35fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0 max(0.4rem, 1.2cqw);
+    height: 100%;
+    overflow: hidden;
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Board-relative typography                                                 */
+/* The board is a container; all chalk is sized in cqw (% of board width),   */
+/* so the writing keeps the exact same proportions at any window size —      */
+/* the whole board just zooms instead of the text reflowing/resizing.        */
+/* max(px, cqw) only acts as a legibility floor on very small screens.       */
+/* ------------------------------------------------------------------------ */
+.board-frame {
+  container-type: inline-size;
+  container-name: chalkboard;
+}
+
+.board-zone {
+  padding: max(0.5rem, 0.85cqw) max(0.55rem, 1cqw) max(0.45rem, 0.75cqw);
+}
+
+.board-zone-body {
+  gap: max(0.6rem, 1cqw);
+  padding-inline-end: 0.25cqw;
+}
+
+.board-zones.board-zones-merged {
+  gap: 0 max(0.7rem, 1.7cqw);
+}
+
+.board-block {
+  font-size: max(14px, 1.79cqw);
+  line-height: 1.55;
+}
+
+.board-heading {
+  font-size: max(15px, 2.03cqw);
+}
+
+.board-block-large {
+  font-size: max(15px, 2.16cqw);
+}
+
+.board-block-large .board-heading {
+  font-size: max(17px, 2.4cqw);
+}
+
+.board-latex {
+  font-size: max(15px, 1.97cqw);
+}
+
+.board-example-title {
+  font-size: max(14px, 1.73cqw);
+}
+
+.board-example-body {
+  font-size: max(14px, 1.85cqw);
+}
+
+.board-zone-empty {
+  font-size: max(13px, 1.59cqw);
+}
+
+.board-example {
+  gap: max(0.18rem, 0.3cqw);
+  padding-inline-start: max(0.4rem, 0.7cqw);
+  margin-bottom: max(0.3rem, 0.5cqw);
+}
+
+.board-list {
+  padding-inline-start: max(0.8rem, 1.2cqw);
+  gap: max(0.2rem, 0.34cqw);
+}
+
+.board-block-boxed {
+  padding: max(0.35rem, 0.6cqw) max(0.45rem, 0.8cqw);
+}
+
+.board-svg svg {
+  max-height: 14cqw;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Measured line layout: identical geometry while writing and when finished  */
+/* ------------------------------------------------------------------------ */
+.chalk-host {
+  position: relative;
+  white-space: normal;
+}
+
+/* Invisible twin used only to read the browser's own wrapped line breaks. */
+.chalk-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: normal;
+}
+
+/* One frame of natural wrapping before measurement lands; geometry matches. */
+.chalk-static {
+  white-space: pre-wrap;
+}
+
+.chalk-hand-line.is-static {
+  animation: none;
+  clip-path: none;
+}
+
+.chalk-line-break {
+  display: block;
+  height: 0.75em;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Boxed blocks hug their content instead of spanning the whole zone         */
+/* ------------------------------------------------------------------------ */
+.board-block-boxed {
+  width: fit-content;
+  max-width: 100%;
+  align-self: flex-start;
+}
+
+/* A boxed formula should be as wide as the formula, not the column. */
+.board-block-boxed .board-latex {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.board-block-boxed .board-latex .katex-display {
+  margin: 0.1rem 0;
+  text-align: left;
+}
+
+.board-block-boxed .board-latex .katex-display > .katex {
+  text-align: left;
+}
+
+/* Math typeset inside a takeaway keeps the reserved red accent. */
+.board-block-takeaway .board-latex .katex,
+.board-block-takeaway .board-latex .katex * {
+  color: inherit;
+}
+
+/* "Label : equation" stays on one readable row when it fits. */
+.board-labelled-math {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.45rem;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Complete formulas: never clip tall handwritten glyphs                     */
+/* overflow-x:auto forces overflow-y to clip too, which cut the dot of "i"   */
+/* and superscripts. Vertical padding gives the ink room inside the padding  */
+/* box; horizontal scroll is kept only for genuinely long formulas.          */
+/* ------------------------------------------------------------------------ */
+.board-latex {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.4em 0.25em;
+}
+
+.chalk-hand-line {
+  overflow: visible;
+}
+
+.board-latex-inline {
+  padding: 0.18em 0.05em;
+}
+
+/* Display formulas read left-aligned like a notebook, boxed or not. */
+.board-latex .katex-display,
+.board-latex .katex-display > .katex {
+  margin: 0;
+  text-align: left;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Question blocks: labelled "Question :" callouts that never wipe the board */
+/* ------------------------------------------------------------------------ */
+.board-block-question {
+  color: #fdf7e6;
+}
+
+.board-question {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding-inline-start: 0.75rem;
+  /* A dashed chalk rule marks "waiting for the student" without a box. */
+  border-inline-start: 2px dashed rgba(255, 224, 102, 0.55);
+}
+
+.board-question-label {
+  color: #ffe066;
+  font-weight: 700;
+  text-align: left;
+  width: fit-content;
+}
+
+.board-question-text {
+  color: #fdf7e6;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Inline math on the SAME baseline and size as the handwriting              */
+/* inline-block + vertical-align:middle + padding shifted every formula off  */
+/* the text baseline (different heights per formula). As a plain inline box, */
+/* KaTeX's own struts align its baseline exactly with the surrounding words.  */
+/* white-space:nowrap keeps an equation in one piece.                         */
+/* ------------------------------------------------------------------------ */
+.board-latex-inline {
+  display: inline;
+  vertical-align: baseline;
+  white-space: nowrap;
+  /* Real breathing room on both sides of a typeset equation: without it a
+     formula rendered mid-sentence reads glued to the word before it
+     ("soit" + "z = a + ib" -> "soitz=a+ib"). */
+  margin: 0 0.3em;
+  padding: 0 0.1em;
+}
+
+/* Same size as the French handwriting (.board-latin = 1.22em). */
+.board-latex-inline .katex {
+  font-size: 1.22em;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Natural chalk wipe (no visible eraser) — a zigzag sweep clears the slate   */
+/* ------------------------------------------------------------------------ */
+
+.board-frame.is-erasing {
+  position: relative;
+  overflow: hidden;
+}
+
+/* A faint chalk-dust film blooms over the whole slate as it is wiped. */
+.board-frame.is-erasing::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 25;
+  background: radial-gradient(
+    ellipse at 50% 45%,
+    rgba(253, 247, 230, 0.1) 0%,
+    rgba(253, 247, 230, 0.04) 50%,
+    transparent 82%
+  );
+  animation: board-surface-smudge 1.15s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+}
+
+@keyframes board-surface-smudge {
+  0% {
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.85;
+  }
+  70% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/*
+ * Each block dissolves as the zigzag wipe passes over it: staggered top-to-
+ * bottom, fading into a soft chalk-dust blur with a tiny downward settle — no
+ * harsh directional smear, so it reads as a natural wipe from any direction.
+ */
+.board-frame.is-erasing .board-block {
+  animation: chalk-wipe-out 0.62s cubic-bezier(0.33, 0, 0.3, 1) forwards;
+  animation-delay: calc(var(--wipe-index, 0) * 70ms);
+  will-change: transform, opacity, filter;
+}
+
+@keyframes chalk-wipe-out {
+  0% {
+    opacity: 1;
+    filter: blur(0px) brightness(1);
+    transform: translateY(0) scale(1);
+  }
+  35% {
+    opacity: 0.6;
+    filter: blur(1.6px) brightness(1.3);
+    transform: translateY(1px) scale(0.995);
+  }
+  100% {
+    opacity: 0;
+    filter: blur(5px) brightness(1.5);
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+/* Connectors fade along with the blocks they join. */
+.board-frame.is-erasing svg {
+  animation: chalk-wipe-out 0.5s ease-out forwards;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Invisible-hand wipe overlay: drifting chalk dust, no sweeping band        */
+/* ------------------------------------------------------------------------ */
+
+.chalk-eraser-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60;
+  overflow: hidden;
+}
+
+/* Chalk dust particles field drifting in the wipe's wake. */
+.chalk-particles-field {
+  position: absolute;
+  inset: 0;
+}
+
+.chalk-dust-particle {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0%, rgba(253, 247, 230, 0.8) 50%, transparent 100%);
+  box-shadow: 0 0 3px rgba(255, 255, 255, 0.5);
+  opacity: 0;
+  animation: chalk-dust-drift 0.8s ease-out forwards;
+}
+
+@keyframes chalk-dust-drift {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+  }
+  25% {
+    opacity: 0.8;
+    transform: translate(calc(var(--drift-x, 0px) * 0.4), 3px) scale(1.1);
+  }
+  70% {
+    opacity: 0.4;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--drift-x, 0px), 14px) scale(0.2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chalk-dust-particle,
+  .board-frame.is-erasing .board-block {
+    animation-duration: 0.3s;
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Interactive check questions: tap choices, math pad, step ordering          */
+/* A small slate card — the question reads in chalk, the answers are keys.    */
+/* ------------------------------------------------------------------------ */
+.quiz-panel {
+  margin-bottom: 0.6rem;
+  border: 1px solid rgba(255, 224, 102, 0.22);
+  border-radius: 16px;
+  padding: 0.75rem 0.85rem 0.65rem;
+  background:
+    radial-gradient(120% 140% at 15% 0%, rgba(38, 73, 65, 0.85) 0%, rgba(20, 40, 36, 0.9) 55%, rgba(12, 24, 22, 0.95) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(253, 247, 230, 0.08),
+    0 12px 28px rgba(0, 0, 0, 0.35);
+  animation: quiz-enter 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  max-height: none;
+  overflow: visible;
+}
+
+.chat-shell.board-on .quiz-panel {
+  max-height: none;
+  overflow: visible;
+}
+
+@keyframes quiz-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.quiz-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.quiz-kind {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px dashed rgba(255, 224, 102, 0.55);
+  background: rgba(255, 224, 102, 0.12);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  color: #ffe066;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.quiz-prompt {
+  margin: 0;
+  unicode-bidi: plaintext;
+  font-family: "Playpen Sans Arabic", "Caveat", "Patrick Hand", "Kalam", cursive;
+  font-size: 1.28rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #fdf7e6;
+}
+
+.quiz-prompt .board-arabic,
+.quiz-choice-text .board-arabic,
+.quiz-order-text .board-arabic,
+.quiz-instruction .board-arabic {
+  font-family: "Playpen Sans Arabic", "Playpen Sans", cursive, sans-serif;
+  font-weight: 500;
+}
+
+.quiz-prompt .board-latin,
+.quiz-choice-text .board-latin,
+.quiz-order-text .board-latin {
+  font-family: "Caveat", "Playpen Sans", "Patrick Hand", "Kalam", cursive, sans-serif;
+  font-weight: 600;
+}
+
+.quiz-instruction {
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.72rem;
+  color: rgba(253, 247, 230, 0.6);
+}
+
+.quiz-body {
+  margin-top: 0.7rem;
+}
+
+.quiz-choices {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.quiz-choices.is-grid-2 {
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.quiz-choices.is-compare {
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+}
+
+.quiz-truefalse {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+}
+
+.quiz-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  text-align: start;
+  border: 1px dashed rgba(253, 247, 230, 0.28);
+  border-radius: 10px;
+  background: rgba(253, 247, 230, 0.05);
+  padding: 0.42rem 0.65rem;
+  color: #fdf7e6;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    transform 0.18s ease,
+    color 0.18s ease;
+}
+
+.quiz-choice-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 6px;
+  background: rgba(255, 224, 102, 0.14);
+  border: 1px solid rgba(255, 224, 102, 0.35);
+  color: #ffe066;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.quiz-choice:hover:not(:disabled) .quiz-choice-badge {
+  background: rgba(255, 224, 102, 0.28);
+  border-color: #ffe066;
+}
+
+.quiz-choice.is-selected .quiz-choice-badge {
+  background: #ffe066;
+  color: #14231f;
+  border-color: #ffe066;
+}
+
+.quiz-choice:hover:not(:disabled) {
+  border-color: rgba(255, 224, 102, 0.7);
+  background: rgba(255, 224, 102, 0.12);
+  transform: translateY(-1px);
+}
+
+.quiz-choice:focus-visible {
+  outline: 2px solid #ffe066;
+  outline-offset: 2px;
+}
+
+.quiz-choice:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.quiz-choice.is-selected {
+  border-style: solid;
+  border-color: #ffe066;
+  background: rgba(255, 224, 102, 0.16);
+  color: #ffe066;
+}
+
+.quiz-choice.is-true:hover:not(:disabled) {
+  border-color: #8ae3d6;
+  background: rgba(138, 227, 214, 0.14);
+}
+
+.quiz-choice.is-false:hover:not(:disabled) {
+  border-color: #ff5b61;
+  background: rgba(255, 91, 97, 0.14);
+}
+
+.quiz-choice-tag {
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: rgba(126, 200, 255, 0.16);
+  color: #7ec8ff;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.quiz-choice-text {
+  font-family: "Playpen Sans Arabic", "Caveat", "Patrick Hand", "Kalam", cursive;
+  font-size: 1.12rem;
+  font-weight: 600;
+  line-height: 1.4;
+  unicode-bidi: plaintext;
+}
+
+.quiz-check {
+  flex-shrink: 0;
+  width: 1.15rem;
+  height: 1.15rem;
+  display: grid;
+  place-items: center;
+  border: 1.5px dashed rgba(253, 247, 230, 0.4);
+  border-radius: 5px;
+  font-size: 0.75rem;
+  color: #ffe066;
+}
+
+.quiz-order {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quiz-order-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px dashed rgba(253, 247, 230, 0.22);
+  border-radius: 10px;
+  background: rgba(253, 247, 230, 0.04);
+  padding: 0.35rem 0.5rem;
+}
+
+.quiz-order-index {
+  flex-shrink: 0;
+  width: 1.35rem;
+  height: 1.35rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255, 224, 102, 0.14);
+  color: #ffe066;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.quiz-order-text {
+  flex: 1;
+  min-width: 0;
+  font-family: "Playpen Sans Arabic", "Caveat", "Patrick Hand", "Kalam", cursive;
+  font-size: 1.08rem;
+  color: #fdf7e6;
+  unicode-bidi: plaintext;
+}
+
+.quiz-order-controls {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.quiz-free-input {
+  width: 100%;
+  border: 1px dashed rgba(253, 247, 230, 0.28);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 0.5rem 0.7rem;
+  color: #fdf7e6;
+  font-size: 0.95rem;
+}
+
+.quiz-free-input:focus {
+  outline: none;
+  border-color: rgba(255, 224, 102, 0.7);
+}
+
+.quiz-free-input.is-area {
+  resize: none;
+  font-family: inherit;
+}
+
+.quiz-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.quiz-hint {
+  color: rgba(253, 247, 230, 0.5);
+  font-size: 0.72rem;
+}
+
+.quiz-skip {
+  border: none;
+  background: none;
+  color: rgba(253, 247, 230, 0.55);
+  font-size: 0.78rem;
+  padding: 0.35rem 0.4rem;
+}
+
+.quiz-skip:hover {
+  color: #fdf7e6;
+}
+
+.quiz-submit {
+  border: none;
+  border-radius: 999px;
+  background: #ffe066;
+  color: #14231f;
+  font-weight: 800;
+  font-size: 0.85rem;
+  padding: 0.5rem 1.1rem;
+  transition: transform 0.16s ease, filter 0.16s ease;
+}
+
+.quiz-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+
+.quiz-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---- Math answer pad ---------------------------------------------------- */
+.math-pad {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.math-pad-field {
+  width: 100%;
+  direction: ltr;
+  text-align: left;
+  border: 1px solid rgba(255, 224, 102, 0.35);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.6rem 0.75rem;
+  color: #ffe066;
+  font-family: "Caveat", "Patrick Hand", "Kalam", KaTeX_Main, serif;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.math-pad-field:focus {
+  outline: none;
+  border-color: #ffe066;
+  box-shadow: 0 0 0 3px rgba(255, 224, 102, 0.16);
+}
+
+.math-pad-field::placeholder {
+  color: rgba(255, 224, 102, 0.35);
+}
+
+.math-pad-keys {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.math-key {
+  border: 1px solid rgba(253, 247, 230, 0.18);
+  border-radius: 9px;
+  background: rgba(253, 247, 230, 0.06);
+  color: #fdf7e6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.4rem 0;
+  transition: background-color 0.14s ease, border-color 0.14s ease, transform 0.1s ease;
+}
+
+.math-key:hover:not(:disabled) {
+  background: rgba(255, 224, 102, 0.14);
+  border-color: rgba(255, 224, 102, 0.5);
+}
+
+.math-key:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.math-key:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.math-key-op {
+  color: #8ae3d6;
+}
+
+.math-key-fn {
+  color: #7ec8ff;
+}
+
+.math-key-ok {
+  background: #ffe066;
+  color: #14231f;
+  border-color: #ffe066;
+  font-weight: 800;
+}
+
+/* ---- Stacked fraction composer ------------------------------------------ */
+.fraction-composer {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  border: 1px dashed rgba(255, 224, 102, 0.35);
+  border-radius: 12px;
+  padding: 0.6rem 0.7rem;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.fraction-stack {
+  display: grid;
+  justify-items: center;
+  gap: 0.2rem;
+  width: 6.5rem;
+}
+
+.fraction-input {
+  width: 100%;
+  direction: ltr;
+  text-align: center;
+  border: 1px solid rgba(253, 247, 230, 0.25);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: #fdf7e6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9rem;
+  padding: 0.25rem;
+}
+
+.fraction-input:focus {
+  outline: none;
+  border-color: #ffe066;
+}
+
+.fraction-bar {
+  width: 100%;
+  height: 2px;
+  border-radius: 2px;
+  background: #ffe066;
+}
+
+.fraction-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+@media (max-width: 520px) {
+  .quiz-choices.is-compare {
+    grid-template-columns: 1fr;
+  }
+
+  .quiz-choices.is-grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .math-pad-keys {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.25rem;
+  }
+
+  .fraction-composer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quiz-panel,
+  .quiz-choice,
+  .quiz-submit {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* "Board full" notice: the tutor is asking for permission to erase. */
+.board-full-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px dashed rgba(255, 224, 102, 0.55);
+  background: rgba(255, 224, 102, 0.12);
+  padding: 0.14rem 0.55rem;
+  color: #ffe066;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+/* «كمّل» becomes the "yes, erase" control while the board is full. */
+.continue-button.is-erase-request {
+  border-color: rgba(255, 224, 102, 0.6);
+  background: rgba(255, 224, 102, 0.16);
+  color: #ffe066;
+  animation: continue-request-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes continue-request-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 224, 102, 0.32);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(255, 224, 102, 0);
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Hand-drawn annotations: circles, labelled arrows, underlines              */
+/* ------------------------------------------------------------------------ */
+.board-block {
+  position: relative;
+  transition: margin 0.3s ease;
+}
+
+.board-annotations {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.board-annot-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+}
+
+.annot-stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.3px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  opacity: 0;
+  animation-name: annot-draw;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1);
+}
+
+@keyframes annot-draw {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
+  4% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+/* The note is handwritten at the arrow's tail, like the rest of the chalk. */
+.board-annot-label {
+  position: absolute;
+  max-width: none;
+  white-space: nowrap;
+  font-family: var(--chalk-latin);
+  font-size: 0.82em;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.12em;
+}
+
+/* Inline KaTeX math inside an arrow/circle note keeps the chalk colour. */
+.board-annot-label-math {
+  display: inline-block;
+}
+
+.board-annot-label-math .katex,
+.board-annot-label-math .katex * {
+  color: inherit !important;
+  font-family: var(--chalk-math) !important;
+  font-style: normal !important;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Cross-block connector arrows (flow / "points back to a rule")             */
+/* ------------------------------------------------------------------------ */
+.board-connectors {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.board-connector-label {
+  transform: translate(-50%, -50%);
+  background: #264941;
+  padding: 0 0.2em;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Student help chips + larger-board view                                    */
+/* ------------------------------------------------------------------------ */
+.help-chip {
+  min-height: 2rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.25rem 0.85rem;
+  color: #d8d9e3;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.help-chip:hover:not(:disabled) {
+  border-color: rgba(255, 224, 102, 0.55);
+  background: rgba(255, 224, 102, 0.1);
+  color: #ffe066;
+  transform: translateY(-1px);
+}
+
+.help-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Lesson stage: board on the LEFT (20:9, never reflows), chat + quiz +      */
+/* composer on the RIGHT. The page is RTL, so this stage is forced LTR.      */
+/* ------------------------------------------------------------------------ */
+.lesson-stage {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.lesson-stage-board {
+  flex-shrink: 0;
+}
+
+.lesson-stage-rail {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-shell.board-on .lesson-stage,
+.chat-shell.board-focus .lesson-stage {
+  flex-direction: row;
+  direction: ltr;
+  align-items: stretch;
+}
+
+.chat-shell.board-on .lesson-stage-board,
+.chat-shell.board-focus .lesson-stage-board {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.3rem 0.45rem 0.35rem 0.7rem;
+}
+
+.chat-shell.board-on .lesson-stage-rail,
+.chat-shell.board-focus .lesson-stage-rail {
+  flex: 0 0 min(26rem, 38%);
+  width: min(26rem, 38%);
+  max-width: 38%;
+  min-width: 16.5rem;
+  direction: rtl;
+  border-inline-start: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(9, 10, 12, 0.2), #090a0c 18%);
+}
+
+/* Board visible -> the conversation is hidden completely. The rail then holds
+   ONLY the interactive question (if any) and the composer. The chat section is
+   nested inside .lesson-stage-rail, so this must not be a child selector. */
+.chat-shell.board-on section[aria-label="المحادثة"],
+.chat-shell.board-focus section[aria-label="المحادثة"] {
+  display: none;
+}
+
+/* The rail stacks its question above the composer, and the composer is pinned. */
+.lesson-stage-rail > footer.composer-area {
+  margin-top: auto;
+}
+
+.chat-shell.board-on .board-wrap,
+.chat-shell.board-focus .board-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.chat-shell.board-on .board-topbar,
+.chat-shell.board-focus .board-topbar {
+  width: 100%;
+  max-width: none;
+  flex-shrink: 0;
+}
+
+.chat-shell.board-on .board-frame,
+.chat-shell.board-focus .board-frame {
+  flex: 0 1 auto;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 20 / 9;
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+}
+
+.chat-shell.board-on .composer-area,
+.chat-shell.board-focus .composer-area {
+  padding: 0.45rem 0.7rem max(0.45rem, env(safe-area-inset-bottom));
+}
+
+.chat-shell.board-on .composer-area > .mx-auto,
+.chat-shell.board-focus .composer-area > .mx-auto {
+  max-width: none;
+}
+
+.chat-shell.board-on .quiz-panel,
+.chat-shell.board-focus .quiz-panel {
+  max-height: none;
+  overflow: visible;
+}
+
+.chat-shell.board-on .teaching-toolbar,
+.chat-shell.board-on .doc-panel,
+.chat-shell.board-focus .teaching-toolbar,
+.chat-shell.board-focus .doc-panel {
+  display: none;
+}
+
+.chat-shell.board-on .chat-header,
+.chat-shell.board-focus .chat-header {
+  height: 3rem;
+}
+
+@media (max-width: 860px) {
+  .chat-shell.board-on .lesson-stage,
+  .chat-shell.board-focus .lesson-stage {
+    flex-direction: column;
+    direction: rtl;
+  }
+
+  .chat-shell.board-on .lesson-stage-board,
+  .chat-shell.board-focus .lesson-stage-board {
+    flex: 0 0 auto;
+    padding: 0.2rem 0.6rem 0;
+  }
+
+  .chat-shell.board-on .lesson-stage-rail,
+  .chat-shell.board-focus .lesson-stage-rail {
+    flex: 1 1 0;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    border-inline-start: 0;
+  }
+
+  .chat-shell.board-on .board-frame,
+  .chat-shell.board-focus .board-frame {
+    flex: 0 0 auto;
+    width: 100%;
+    max-height: 38vh;
+    aspect-ratio: 20 / 9;
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Blue chalk: reserved for questions to the student                         */
+/* ------------------------------------------------------------------------ */
+.chalk-blue {
+  color: #7ec8ff;
+}
+
+/* The whole question — label, text and its rule — is blue. */
+.board-block-question,
+.board-question-label,
+.board-question-text,
+.board-block-question .board-text,
+.board-block-question .board-latin,
+.board-block-question .board-arabic {
+  color: #7ec8ff;
+}
+
+.board-block-question .board-latex .katex,
+.board-block-question .board-latex-inline .katex,
+.board-block-question .board-latex .katex *,
+.board-block-question .board-latex-inline .katex * {
+  color: #7ec8ff;
+}
+
+.board-question {
+  border-inline-start-color: rgba(126, 200, 255, 0.6);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Simplified outer UI: quiet, icon-first chrome around the board + chat     */
+/* ------------------------------------------------------------------------ */
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.28rem 0.42rem;
+}
+
+.header-icon-button {
+  display: inline-flex;
+  height: 2.15rem;
+  width: 2.15rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #a1a1aa;
+  transition:
+    color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.header-icon-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+  color: #f4f4f5;
+}
+
+.header-icon-button:active:not(:disabled) {
+  transform: scale(0.93);
+}
+
+.header-icon-button:disabled {
+  cursor: wait;
+  opacity: 0.45;
+}
+
+.header-sep {
+  width: 1px;
+  height: 1.15rem;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 0.15rem;
+}
+
+.header-pill {
+  display: inline-flex;
+  height: 2.15rem;
+  align-items: center;
+  gap: 0.42rem;
+  border-radius: 999px;
+  padding: 0 0.72rem;
+  color: #8a8b93;
+  font-size: 0.72rem;
+  font-weight: 500;
+  transition:
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.header-pill:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #f4f4f5;
+}
+
+.header-pill.is-on {
+  background: rgba(99, 112, 240, 0.14);
+  color: #c3caff;
+}
+
+.header-pill .status-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+}

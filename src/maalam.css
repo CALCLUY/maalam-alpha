@@ -1,0 +1,552 @@
+/* ========================================================================== */
+/* Maalam theme — outer UI                                                     */
+/* Palette: ink-black surfaces, emerald accent, chalk-gold highlight. The      */
+/* accents deliberately echo the blackboard so the page and the board feel     */
+/* like one product. Loaded after globals.css so it overrides the base look.  */
+/* ========================================================================== */
+:root {
+  --m-bg: #0a0d0e;
+  --m-surface: #11171a;
+  --m-surface-2: #172023;
+  --m-line: rgba(255, 255, 255, 0.08);
+  --m-line-strong: rgba(127, 227, 196, 0.34);
+  --m-text: #f3f6f4;
+  --m-muted: #93a09b;
+  --m-accent: #34d6a4;
+  --m-accent-2: #1fb88a;
+  --m-accent-soft: #7fe3c4;
+  --m-accent-ink: #06231b;
+  --m-gold: #ffe066;
+  --m-radius: 1.25rem;
+}
+
+body,
+.setup-screen,
+.chat-shell {
+  background-color: var(--m-bg);
+}
+
+.chat-shell {
+  background:
+    radial-gradient(60rem 28rem at 50% -8%, rgba(52, 214, 164, 0.075), transparent 70%),
+    radial-gradient(40rem 24rem at 100% 100%, rgba(255, 224, 102, 0.03), transparent 70%),
+    var(--m-bg);
+}
+
+::selection {
+  background: rgba(52, 214, 164, 0.35);
+}
+
+/* ---- Logo + wordmark ----------------------------------------------------- */
+.maalam-logo {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 30%;
+  background:
+    radial-gradient(circle at 22% 12%, rgba(255, 255, 255, 0.34), transparent 34%),
+    linear-gradient(150deg, #3be0ad 0%, #1fb88a 48%, #0f6a52 100%);
+  box-shadow:
+    0 10px 30px rgba(31, 184, 138, 0.22),
+    inset 0 1px rgba(255, 255, 255, 0.22),
+    inset 0 -8px 14px rgba(5, 60, 44, 0.28);
+}
+
+.maalam-logo::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.2), transparent 62%);
+  content: "";
+  transform: translateX(-130%);
+  animation: logo-sheen 7s ease-in-out infinite;
+}
+
+.maalam-logo span {
+  position: relative;
+  z-index: 1;
+  margin-top: -0.12em;
+  color: #fffbe6;
+  font-family: "Playpen Sans Arabic", "IBM Plex Sans Arabic", sans-serif;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 2px 6px rgba(5, 60, 44, 0.45);
+}
+
+.brand-wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  color: var(--m-text);
+  font-family: "Sora", "IBM Plex Sans Arabic", sans-serif;
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-transform: lowercase;
+}
+
+.brand-wordmark.is-header {
+  font-size: 0.95rem;
+  line-height: 1.15;
+}
+
+.brand-wordmark small {
+  color: var(--m-gold);
+  font-family: "Playpen Sans Arabic", sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ---- Connection status pill ---------------------------------------------- */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+  color: var(--m-muted);
+  font-size: 0.64rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+
+.status-pill-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: #fbbf24;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.14);
+}
+
+.status-pill[data-state="connected"] .status-pill-dot {
+  background: var(--m-accent);
+  box-shadow: 0 0 0 3px rgba(52, 214, 164, 0.16);
+  animation: status-pulse 2.6s ease-in-out infinite;
+}
+
+.status-pill[data-state="disconnected"] .status-pill-dot {
+  background: #71717a;
+  box-shadow: 0 0 0 3px rgba(113, 113, 122, 0.15);
+}
+
+@keyframes status-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(52, 214, 164, 0.16);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(52, 214, 164, 0.04);
+  }
+}
+
+/* ---- Setup screen --------------------------------------------------------- */
+.setup-screen::before {
+  background-image:
+    linear-gradient(rgba(127, 227, 196, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(127, 227, 196, 0.03) 1px, transparent 1px);
+}
+
+.ambient-one {
+  background: #1fb88a;
+  opacity: 0.17;
+}
+
+.ambient-two {
+  background: #b58b12;
+  opacity: 0.09;
+}
+
+.setup-badge {
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--m-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.35rem 0.8rem;
+  color: var(--m-muted);
+  font-size: 0.7rem;
+}
+
+.setup-grid {
+  display: grid;
+  width: 100%;
+  max-width: 72rem;
+  min-height: calc(100dvh - 5rem);
+  margin: 0 auto;
+  align-content: center;
+  gap: 2.5rem;
+  padding: 1rem 1.5rem 4rem;
+}
+
+@media (min-width: 960px) {
+  .setup-grid {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    align-items: center;
+    gap: 4.5rem;
+    padding: 1rem 2.5rem 4rem;
+  }
+}
+
+.setup-eyebrow {
+  margin: 2rem 0 0;
+  color: var(--m-accent-soft);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.setup-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  margin: 0.7rem 0 0;
+  color: var(--m-text);
+  font-family: "Sora", sans-serif;
+  font-size: clamp(3rem, 8vw, 5.2rem);
+  font-weight: 650;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  text-transform: lowercase;
+}
+
+.setup-title small {
+  background: linear-gradient(180deg, #fff3b0, #ffd23f);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-family: "Playpen Sans Arabic", sans-serif;
+  font-size: 0.5em;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.setup-lead {
+  max-width: 34rem;
+  margin: 1.3rem 0 0;
+  color: #aab6b1;
+  font-size: 1.02rem;
+  line-height: 2;
+}
+
+.setup-features {
+  display: grid;
+  gap: 0.7rem;
+  margin: 1.8rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-features li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: #c9d3cf;
+  font-size: 0.88rem;
+}
+
+.setup-features li svg {
+  box-sizing: content-box;
+  flex: none;
+  padding: 0.5rem;
+  border: 1px solid rgba(127, 227, 196, 0.22);
+  border-radius: 0.7rem;
+  background: rgba(52, 214, 164, 0.08);
+  color: var(--m-accent);
+}
+
+.setup-card {
+  border: 1px solid var(--m-line);
+  border-radius: 1.6rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
+    var(--m-surface);
+  padding: clamp(1.4rem, 3vw, 2.2rem);
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.45),
+    inset 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.setup-card-title {
+  margin: 0;
+  color: var(--m-text);
+  font-size: 1.45rem;
+  font-weight: 650;
+}
+
+.setup-card-sub {
+  margin: 0.4rem 0 0;
+  color: var(--m-muted);
+  font-size: 0.85rem;
+}
+
+.key-field {
+  background: rgba(0, 0, 0, 0.28);
+  border-color: var(--m-line);
+}
+
+.key-field:focus-within {
+  border-color: var(--m-line-strong);
+  background: rgba(0, 0, 0, 0.36);
+  box-shadow: 0 0 0 3px rgba(52, 214, 164, 0.14);
+}
+
+.connect-button {
+  background: linear-gradient(135deg, #43e3b1, #1fb88a);
+  color: var(--m-accent-ink);
+  font-weight: 700;
+  box-shadow:
+    0 14px 38px rgba(31, 184, 138, 0.25),
+    inset 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.connect-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #58ecc0, #25c797);
+  box-shadow:
+    0 18px 44px rgba(31, 184, 138, 0.32),
+    inset 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.button-spinner {
+  border-color: rgba(6, 35, 27, 0.25);
+  border-top-color: var(--m-accent-ink);
+}
+
+.doda-card {
+  border-color: rgba(127, 227, 196, 0.16);
+  background: rgba(52, 214, 164, 0.05);
+}
+
+/* ---- Chat chrome ----------------------------------------------------------- */
+.chat-header {
+  border-bottom: 1px solid var(--m-line);
+  background: rgba(10, 13, 14, 0.82);
+  box-shadow: 0 1px 0 rgba(52, 214, 164, 0.05);
+}
+
+.header-actions {
+  border-color: var(--m-line);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.header-icon-button:hover:not(:disabled) {
+  background: rgba(52, 214, 164, 0.1);
+  color: var(--m-accent-soft);
+}
+
+.header-pill.is-on {
+  border-color: rgba(127, 227, 196, 0.3);
+  background: rgba(52, 214, 164, 0.1);
+  color: var(--m-accent-soft);
+}
+
+.ref-chip {
+  border-color: rgba(127, 227, 196, 0.22);
+  background: rgba(52, 214, 164, 0.09);
+  color: var(--m-accent-soft);
+}
+
+.status-dot.is-ready {
+  background: var(--m-accent);
+}
+
+/* Voice orb + brand-coloured motion */
+.voice-orb-ring {
+  border-color: rgba(127, 227, 196, 0.16);
+}
+
+.voice-orb .ring-two {
+  border-color: rgba(127, 227, 196, 0.24);
+}
+
+.voice-orb-core {
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.34), transparent 27%),
+    linear-gradient(145deg, #3be0ad, #0f6a52);
+  box-shadow:
+    0 18px 65px rgba(31, 184, 138, 0.3),
+    inset 0 1px rgba(255, 255, 255, 0.2);
+}
+
+.thinking-bars span {
+  background: var(--m-accent);
+}
+
+.streaming-caret {
+  background: var(--m-accent);
+}
+
+.replay-button:hover {
+  color: var(--m-accent-soft);
+}
+
+.chat-glow {
+  background: rgba(52, 214, 164, 0.055);
+}
+
+/* Composer */
+.composer-area {
+  background: linear-gradient(to top, var(--m-bg) 72%, rgba(10, 13, 14, 0));
+}
+
+.composer-wrap {
+  border-color: var(--m-line);
+  border-radius: 1.2rem;
+  background: rgba(20, 27, 30, 0.96);
+}
+
+.composer-wrap:focus-within {
+  border-color: var(--m-line-strong);
+  box-shadow:
+    0 14px 50px rgba(0, 0, 0, 0.32),
+    0 0 0 3px rgba(52, 214, 164, 0.09);
+}
+
+.send-button {
+  background: linear-gradient(135deg, #43e3b1, #1fb88a);
+  color: var(--m-accent-ink);
+  box-shadow: 0 8px 24px rgba(31, 184, 138, 0.25);
+}
+
+.send-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #58ecc0, #25c797);
+}
+
+.send-button:disabled {
+  background: #1d2528;
+  color: #5d6a66;
+}
+
+.continue-button:hover:not(:disabled) {
+  border-color: rgba(127, 227, 196, 0.5);
+  background: rgba(52, 214, 164, 0.14);
+  color: var(--m-accent-soft);
+}
+
+.continue-button:focus-visible,
+.send-button:focus-visible {
+  box-shadow: 0 0 0 3px rgba(52, 214, 164, 0.35);
+}
+
+.attach-button:hover:not(:disabled) {
+  background: rgba(52, 214, 164, 0.1);
+  color: var(--m-accent-soft);
+}
+
+/* Upload card on the empty state */
+.upload-card {
+  border-color: rgba(127, 227, 196, 0.32);
+  background: rgba(52, 214, 164, 0.05);
+}
+
+.upload-card:hover:not(:disabled) {
+  border-color: rgba(127, 227, 196, 0.65);
+  background: rgba(52, 214, 164, 0.1);
+}
+
+.upload-card strong {
+  color: #e3fbf3;
+}
+
+.upload-card-icon {
+  background: rgba(52, 214, 164, 0.16);
+  color: var(--m-accent-soft);
+}
+
+/* PDF / lesson panel */
+.doc-action {
+  border-color: rgba(127, 227, 196, 0.24);
+  background: rgba(52, 214, 164, 0.07);
+  color: #c9f5e6;
+}
+
+.doc-action:hover:not(:disabled) {
+  border-color: rgba(127, 227, 196, 0.6);
+  background: rgba(52, 214, 164, 0.16);
+}
+
+.doc-spinner {
+  border-color: rgba(127, 227, 196, 0.25);
+  border-top-color: var(--m-accent);
+}
+
+.lesson-progress-fill {
+  background: linear-gradient(90deg, #1fb88a, #7fe3c4);
+}
+
+/* Media picker + status */
+.media-picker {
+  border-color: rgba(127, 227, 196, 0.22);
+  background: var(--m-surface);
+}
+
+.media-picker-kicker {
+  color: var(--m-accent-soft);
+}
+
+.media-picker-choice {
+  color: var(--m-accent);
+}
+
+.media-picker-choice:hover:not(:disabled),
+.media-picker-choice:focus-visible {
+  background: rgba(52, 214, 164, 0.1);
+  color: #bdf3de;
+}
+
+.media-picker-action.is-primary {
+  border-color: #2fcb9c;
+  background: linear-gradient(135deg, #43e3b1, #1fb88a);
+  color: var(--m-accent-ink);
+  font-weight: 700;
+}
+
+.media-input-status {
+  color: #c4f1e0;
+}
+
+/* Remaining Tailwind arbitrary indigo accents used by older markup. Exact
+   class-token matches only, so hover variants keep their own behaviour. */
+[class~="text-[#a3aeff]"],
+[class~="text-[#8b96ff]"] {
+  color: var(--m-accent-soft) !important;
+}
+
+[class~="border-indigo-500/20"] {
+  border-color: rgba(127, 227, 196, 0.22) !important;
+}
+
+[class~="bg-indigo-500/10"] {
+  background-color: rgba(52, 214, 164, 0.1) !important;
+}
+
+/* Scrollbars follow the brand */
+* {
+  scrollbar-color: #2a3a37 transparent;
+}
+
+/* ---- Small screens ----------------------------------------------------------- */
+@media (max-width: 640px) {
+  .setup-title {
+    gap: 0.6rem;
+  }
+
+  .setup-lead {
+    font-size: 0.95rem;
+  }
+
+  .chat-header .brand-wordmark small {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maalam-logo::after,
+  .status-pill[data-state="connected"] .status-pill-dot {
+    animation: none;
+  }
+}
