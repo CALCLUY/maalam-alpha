@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import { Check, Copy, Download, Eraser, Expand, Maximize2, Minimize2, Presentation, Shrink } from "lucide-react";
@@ -703,7 +703,79 @@ const CHALK_COLORS: Record<string, string> = {
   blue: "#7ec8ff",
 };
 
-function BoardBlockView({
+/**
+ * A display formula wider than its zone is written smaller until it fits (with
+ * a readable floor) instead of forcing the learner to scroll the board
+ * sideways. Formulas that already fit keep the normal chalk size, so only the
+ * genuinely long ones become "small writing".
+ */
+function AutoFitLatex({
+  html,
+  className,
+  style,
+  onAnimationEnd,
+}: {
+  html: string;
+  className?: string;
+  style?: CSSProperties;
+  onAnimationEnd?: () => void;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    let frame = 0;
+
+    const fit = () => {
+      const host = el.parentElement;
+      if (!host) return;
+      // Reset to the natural (responsive) size before measuring. The width of
+      // the *parent* is the available space: measuring the element itself would
+      // feed its own fit-content width back into the calculation.
+      el.style.fontSize = "";
+      const available = host.clientWidth;
+      if (available < 8) return;
+      const basePx = parseFloat(getComputedStyle(el).fontSize) || 16;
+      const content = el.scrollWidth;
+      if (content > available + 2) {
+        const scale = Math.max(0.5, (available - 4) / content);
+        el.style.fontSize = `${(basePx * scale).toFixed(2)}px`;
+      }
+    };
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fit);
+    };
+
+    schedule();
+    // Observe the zone, never the formula: shrinking changes the formula's own
+    // width, and observing it would re-trigger the fit on every frame.
+    const zone = el.closest<HTMLElement>(".board-zone-body") ?? el.parentElement;
+    const observer = new ResizeObserver(schedule);
+    if (zone) observer.observe(zone);
+    if (document.fonts?.ready) void document.fonts.ready.then(schedule).catch(() => undefined);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      el.style.fontSize = "";
+    };
+  }, [html]);
+
+  return (
+    <div
+      ref={ref}
+      className={className}
+      dir="ltr"
+      style={style}
+      onAnimationEnd={onAnimationEnd}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
+function BoardBlockViewComponent({
   block,
   blockIndex = 0,
   active = false,
@@ -878,12 +950,11 @@ function BoardBlockView({
   } else if (block.type === "latex" || block.type === "formula") {
     const html = block.content ? renderLatexSafe(block.content, block.accentSymbols) : null;
     body = html ? (
-      <div
+      <AutoFitLatex
+        html={html}
         className={`board-latex ${isWriting ? "chalk-hand-line is-ltr" : ""}`}
-        dir="ltr"
         style={isWriting ? ({ animationDuration: "1.15s" } as CSSProperties) : undefined}
         onAnimationEnd={isWriting ? finishWriting : undefined}
-        dangerouslySetInnerHTML={{ __html: html }}
       />
     ) : (
       <ChalkText
@@ -912,12 +983,11 @@ function BoardBlockView({
   } else if (mathHtml) {
     // A bare equation written as text/takeaway (e.g. a red final answer): typeset it.
     body = (
-      <div
+      <AutoFitLatex
+        html={mathHtml}
         className={`board-latex ${isWriting ? "chalk-hand-line is-ltr" : ""}`}
-        dir="ltr"
         style={isWriting ? ({ animationDuration: "1.05s" } as CSSProperties) : undefined}
         onAnimationEnd={isWriting ? finishWriting : undefined}
-        dangerouslySetInnerHTML={{ __html: mathHtml }}
       />
     );
   } else if (labelledMath) {
@@ -925,16 +995,15 @@ function BoardBlockView({
     body = (
       <div className="board-labelled-math">
         <ChalkText text={labelledMath.label} className="board-text" animate={isWriting} />
-        <div
+        <AutoFitLatex
+          html={labelledMath.html}
           className={`board-latex ${isWriting ? "chalk-hand-line is-ltr" : ""}`}
-          dir="ltr"
           style={
             isWriting
               ? ({ animationDuration: "1.05s", animationDelay: "0.45s" } as CSSProperties)
               : undefined
           }
           onAnimationEnd={isWriting ? finishWriting : undefined}
-          dangerouslySetInnerHTML={{ __html: labelledMath.html }}
         />
       </div>
     );
@@ -961,6 +1030,14 @@ function BoardBlockView({
     </div>
   );
 }
+
+/**
+ * Memoized so the 80 ms transcript refresh never re-typesets every formula on
+ * the board while the tutor is still speaking (that main-thread work used to
+ * starve the audio scheduler and chop the voice). Props are immutable blocks;
+ * only the one being written changes.
+ */
+const BoardBlockView = memo(BoardBlockViewComponent);
 
 /**
  * Blocks are written ONE AT A TIME, in the order the tutor produced them, so a

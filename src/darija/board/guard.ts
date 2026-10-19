@@ -53,6 +53,61 @@ function isPlainLabel(label: string): boolean {
   return /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’\- ]*$/.test(label) && !/[=<>≤≥≠^_\\\/]/.test(label);
 }
 
+/** 3+ letter words that are genuinely math notation, not French prose. */
+const MATH_WORDS = new Set([
+  "sin", "cos", "tan", "cot", "sec", "csc", "log", "ln", "lim", "max", "min",
+  "sup", "inf", "det", "exp", "mod", "gcd", "arg", "vec", "hat", "bar", "abs",
+]);
+
+/** Symbol-like tokens (PV, nRT, TPN): notation, never French prose. */
+function isSymbolWord(word: string): boolean {
+  return /^[A-Z]{1,5}$/.test(word) || /^[a-z][A-Za-z]*[A-Z]/.test(word);
+}
+
+/**
+ * True when a single `$...$` span is really PROSE (French words, units) and
+ * must not be typeset by KaTeX. Math mode drops every space, so the model's
+ * `Pour $1 mole de gaz à TPN$` used to render as "Pour1moledegazaTPN".
+ */
+function isProseMathSpan(span: string): boolean {
+  const text = span.trim();
+  if (!text) return true;
+  // A real LaTeX command means real math ("\frac{3}{4}").
+  if (/\\[A-Za-z]{2,}/.test(text)) return false;
+  // No whitespace at all: a single token is math ("TPN", "3-2i", "0,75").
+  if (!/\s/.test(text)) return false;
+  // "la forme z = a + ib où i^2 = -1", "1 mole de gaz à TPN", "M = 18 g/mol"
+  // → prose. "PV = nRT", "z = a + ib", "x^2 + 3x - 4" contain no French word.
+  return text.split(/\s+/).some((token) => {
+    const word = token.replace(/[^A-Za-zÀ-ÿ]+/g, "");
+    return word.length >= 3 && !isSymbolWord(word) && !MATH_WORDS.has(word.toLowerCase());
+  });
+}
+
+/** Removes the $...$ delimiters around prose spans, leaving real math intact. */
+function stripProseMathDelimiters(value: string): string {
+  return value.replace(/\$([^$\n]+)\$/g, (whole, span: string) =>
+    isProseMathSpan(span) ? span.trim() : whole,
+  );
+}
+
+/**
+ * Cleans every textual field of a board write before any normalization:
+ * KaTeX is only for real math, never for French sentences or units.
+ */
+export function sanitizeBoardWriteText(args: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...args };
+  if (typeof next.content === "string") next.content = stripProseMathDelimiters(next.content);
+  if (typeof next.title === "string") next.title = stripProseMathDelimiters(next.title);
+  if (typeof next.term === "string") next.term = stripProseMathDelimiters(next.term);
+  if (Array.isArray(next.items)) {
+    next.items = next.items.map((item) =>
+      typeof item === "string" ? stripProseMathDelimiters(item) : item,
+    );
+  }
+  return next;
+}
+
 /**
  * Makes model-written math explicit for tool feedback; rendering still has its own fallback.
  * "Label : equation" is left as text: the renderer keeps the label handwritten and
@@ -67,8 +122,19 @@ function isPlainLabel(label: string): boolean {
 export function normalizeBoardWriteMath(args: Record<string, unknown>): Record<string, unknown> {
   const type = args.type;
   const zone = args.zone;
-  if (zone !== "middle" || (type !== "text" && type !== "takeaway")) return args;
   const content = typeof args.content === "string" ? args.content.trim() : "";
+
+  // A prose sentence forced into a formula block would still lose its spaces in
+  // math mode; render it as plain text instead of a broken unreadable formula.
+  if (
+    zone === "middle" &&
+    (type === "formula" || type === "latex") &&
+    isProseMathSpan(content)
+  ) {
+    return { ...args, type: "text" };
+  }
+
+  if (zone !== "middle" || (type !== "text" && type !== "takeaway")) return args;
 
   // $...$ delimiters = prose with inline math. ChalkText handles this correctly
   // via its inlineMath pipeline; promoting to formula would destroy the layout.

@@ -6,7 +6,7 @@ import { Behavior, Type, type FunctionDeclaration } from "@google/genai";
 
 export const BOARD_WRITE_TOOL: FunctionDeclaration = {
   name: "board_write",
-  behavior: Behavior.BLOCKING,
+  behavior: Behavior.NON_BLOCKING,
   description:
     "Write on the blackboard while teaching. The two visible areas are: " +
     "- 'middle' (large formal French area): definitions, objectives, exam steps, formulas, diagrams and final answers. " +
@@ -74,7 +74,7 @@ export const BOARD_WRITE_TOOL: FunctionDeclaration = {
 
 export const BOARD_CLEAR_TOOL: FunctionDeclaration = {
   name: "board_clear",
-  behavior: Behavior.BLOCKING,
+  behavior: Behavior.NON_BLOCKING,
   description:
     "Erase a zone or the whole board. The board NEVER erases itself: when a zone is full, board_write answers board_full and the learner must approve the erase with the «امسح وكمّل» button. Only call this after they have agreed (or when changing topic / when examples are no longer relevant).",
   parameters: {
@@ -91,7 +91,7 @@ export const BOARD_CLEAR_TOOL: FunctionDeclaration = {
 
 export const BOARD_REMOVE_TOOL: FunctionDeclaration = {
   name: "board_remove",
-  behavior: Behavior.BLOCKING,
+  behavior: Behavior.NON_BLOCKING,
   description: "Erase a specific block from the blackboard using its id (returned by board_write).",
   parameters: {
     type: Type.OBJECT,
@@ -104,7 +104,7 @@ export const BOARD_REMOVE_TOOL: FunctionDeclaration = {
 
 export const BOARD_ANNOTATE_TOOL: FunctionDeclaration = {
   name: "board_annotate",
-  behavior: Behavior.BLOCKING,
+  behavior: Behavior.NON_BLOCKING,
   description:
     "PROACTIVE TEACHING TOOL — use it yourself, never wait for the student to ask, but use it ONLY where a mark changes what the student understands in the sentence you are saying right now. " +
     "TIMING: call it at the moment you speak about that exact symbol, so the mark appears as its meaning is heard. " +
@@ -165,7 +165,7 @@ export const BOARD_ANNOTATE_TOOL: FunctionDeclaration = {
 
 export const ASK_INTERACTIVE_TOOL: FunctionDeclaration = {
   name: "ask_interactive",
-  behavior: Behavior.BLOCKING,
+  behavior: Behavior.NON_BLOCKING,
   description:
     "Ask the learner a TRICKY tap-to-answer check. NEVER a free-written answer and NEVER a calculator/fill-in blank — those kinds are forbidden. " +
     "The question must test UNDERSTANDING, not arithmetic: distractors are plausible misconceptions (sign error, swapped real/imaginary, forgotten conjugate, wrong order of operations), never obviously-wrong numbers. " +
@@ -176,6 +176,7 @@ export const ASK_INTERACTIVE_TOOL: FunctionDeclaration = {
     "kind='truefalse' = a trap statement that looks true if they mix two close ideas (e.g. 'The imaginary part of $3-2i$ is $-2i$'). " +
     "kind='compare' = TWO students' solutions, one with a classic hidden mistake; 'Which solution is correct?' — put the two solutions in 'options'. " +
     "The prompt stays in short simple French (math in $...$); options/items may contain $...$ math too. " +
+    "ALWAYS send the full choice list with the call — a check question without tappable choices is invalid. " +
     "Ask the question ALOUD in Darija as you call this, then END THE TURN and wait — never answer it yourself.",
   parameters: {
     type: Type.OBJECT,
@@ -213,7 +214,7 @@ export const ASK_INTERACTIVE_TOOL: FunctionDeclaration = {
 
 export const BOARD_CONNECT_TOOL: FunctionDeclaration = {
   name: "board_connect",
-  behavior: Behavior.BLOCKING,
+  behavior: Behavior.NON_BLOCKING,
   description:
     "PROACTIVE FLOW & REFERENCE ARROW TOOL: Do NOT wait for the student to ask! When you show a sequence or flow (step 1 → step 2, cause → effect, one idea building into the next: a process, a reaction, a cause/effect chain) or point back to a formula/rule written earlier so the student sees why the current step is valid, proactively call this tool to draw a connecting arrow between them. " +
     "Do not use this to point at a piece INSIDE one single block (use board_annotate for that) and do not connect two things that are already next to each other on the board — proximity already shows the link; an arrow there is redundant and just adds clutter. " +
@@ -253,7 +254,7 @@ export const BOARD_CONNECT_TOOL: FunctionDeclaration = {
  */
 export const LESSON_POINT_COMPLETE_TOOL: FunctionDeclaration = {
   name: "lesson_point_complete",
-  behavior: Behavior.BLOCKING,
+  behavior: Behavior.NON_BLOCKING,
   description:
     "Mark the current PDF teaching point complete AFTER the learner has answered its check question and you have responded to that exact answer with feedback. Call ONLY when the learner's answer is correct or they have completed one supported retry; never mark complete before asking the check, before the student's reply, or when they remain confused/unanswered. This is the ONLY way to advance PDF coverage; never advance/restart the PDF from your own guess. After calling, STOP this turn — teach the next point only after the next learner input.",
   parameters: {

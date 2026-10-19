@@ -29,6 +29,7 @@ export {
   normalizeBoardWriteDefinition,
   normalizeBoardWriteMath,
   normalizeBoardWriteQuestion,
+  sanitizeBoardWriteText,
 } from "./guard";
 export type { BoardBlock, BoardBlockType, BoardZone, ChalkColor } from "./types";
 export { applyBoardAnnotate, MAX_ACTIVE_ARROWS } from "./annotate";
