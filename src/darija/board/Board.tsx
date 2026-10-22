@@ -2,7 +2,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import { Check, Copy, Download, Eraser, Expand, Maximize2, Minimize2, Presentation, Shrink } from "lucide-react";
+import { Check, Copy, Download, Eraser, Expand, Presentation, Shrink } from "lucide-react";
 import { AnnotationLayer } from "./AnnotationLayer";
 import { ConnectorLayer } from "./ConnectorLayer";
 import { assignConnectorSides, connectorGutters } from "./connect";
@@ -1229,7 +1229,6 @@ export function Blackboard({
   blocks,
   connectors = [],
   collapsed,
-  onToggleCollapsed,
   onClear,
   onZoneFull,
   erasing = false,
@@ -1245,7 +1244,6 @@ export function Blackboard({
   /** Cross-block flow / reference arrows (see board_connect). */
   connectors?: BoardConnector[];
   collapsed: boolean;
-  onToggleCollapsed: () => void;
   onClear: (zone?: BoardZone) => void;
   /** A zone has physically run out of room: flag it as full (never erases). */
   onZoneFull?: (zone: BoardZone) => void;
@@ -1322,7 +1320,6 @@ export function Blackboard({
         <div className="board-topbar-title">
           <Presentation className="h-4 w-4 text-[#ffe066]" />
           <span>السبورة</span>
-          <span className="board-chalk-badge">2 Zones</span>
           {fullZones.length > 0 && (
             <span className="board-full-badge" role="status">
               <Eraser className="h-3 w-3" />
@@ -1341,7 +1338,6 @@ export function Blackboard({
                 aria-label="نسخ الملاحظات"
               >
                 {notesState === "copied" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                {notesState === "copied" ? "تنسخات" : "نسخ الملاحظات"}
               </button>
               <button
                 type="button"
@@ -1356,9 +1352,6 @@ export function Blackboard({
                 ) : (
                   <Download className="h-3.5 w-3.5" />
                 )}
-                <span className="hidden sm:inline">
-                  {notesState === "exporting" ? "جاري التصدير…" : notesState === "error" ? "عاود" : "PDF"}
-                </span>
               </button>
             </>
           )}
@@ -1369,9 +1362,9 @@ export function Blackboard({
               onClick={onToggleFocus}
               aria-pressed={focus}
               title={focus ? "رجّع العرض العادي" : "كبّر السبورة"}
+              aria-label={focus ? "رجّع العرض العادي" : "كبّر السبورة"}
             >
               {focus ? <Shrink className="h-3.5 w-3.5" /> : <Expand className="h-3.5 w-3.5" />}
-              {focus ? "صغّر" : "كبّر"}
             </button>
           )}
           {!collapsed && (
@@ -1379,20 +1372,12 @@ export function Blackboard({
               type="button"
               className={`board-mini-button${fullZones.length ? " is-erase-request" : ""}`}
               onClick={() => (onRequestErase ? onRequestErase() : onClear())}
+              title={fullZones.length ? "امسح السبورة وكمّل" : "مسح السبورة"}
+              aria-label={fullZones.length ? "امسح السبورة وكمّل" : "مسح السبورة"}
             >
               <Eraser className="h-3.5 w-3.5" />
-              {fullZones.length ? "امسح وكمّل" : "مسح السبورة"}
             </button>
           )}
-          <button
-            type="button"
-            className="board-mini-button"
-            onClick={onToggleCollapsed}
-            aria-pressed={!collapsed}
-          >
-            {collapsed ? <Maximize2 className="h-3.5 w-3.5" /> : <Minimize2 className="h-3.5 w-3.5" />}
-            {collapsed ? "ورّي السبورة" : "خبّي السبورة"}
-          </button>
         </div>
       </div>
       {!collapsed && (
@@ -1402,6 +1387,13 @@ export function Blackboard({
           aria-label="السبورة ديال الأستاذ"
         >
           {erasing && <ChalkEraserOverlay />}
+          {blocks.length === 0 && (
+            <div className="board-empty-overlay">
+              <Presentation className="h-5 w-5" />
+              <p>السبورة غادي تتعمّر فاش يبدا الشرح</p>
+              <small>كتب سؤالك ولا ارفع تمرينك لتحت.</small>
+            </div>
+          )}
           <div className="board-zones board-zones-merged">
             <BoardZoneColumn
               blocks={formal}

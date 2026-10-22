@@ -23,10 +23,12 @@ import {
   FileImage,
   FileUp,
   GraduationCap,
+  MoreHorizontal,
   Paperclip,
   KeyRound,
   LockKeyhole,
   Plus,
+  Presentation,
   RotateCcw,
   Sparkles,
   Volume2,
@@ -49,7 +51,6 @@ import {
   buildResumeHistory,
   buildTutorTurnContext,
   DEFAULT_TEACHING_PREFERENCES,
-  isTutorAction,
   TEACHING_SOURCES,
   type LearnerLevel,
   type TeachingPreferences,
@@ -391,7 +392,7 @@ function TeachingSettings({
         >
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-medium text-[#a3aeff]">الطريقة ديال Maalam</p>
+              <p className="text-xs font-medium text-[#45d6a8]">الطريقة ديال Maalam</p>
               <h2 id="teaching-title" className="mt-2 text-2xl font-medium text-zinc-100">نفهمو، نجرّبو، ونراجعو.</h2>
             </div>
             <button
@@ -539,10 +540,11 @@ export default function App() {
   });
   const [boardBlocks, setBoardBlocks] = useState<BoardBlock[]>([]);
   const [boardConnectors, setBoardConnectors] = useState<BoardConnector[]>([]);
-  const [boardCollapsed, setBoardCollapsed] = useState(false);
+  const [boardCollapsed, setBoardCollapsed] = useState(true);
   const [boardFocus, setBoardFocus] = useState(false);
   const boardBlocksRef = useRef<BoardBlock[]>([]);
   const boardConnectorsRef = useRef<BoardConnector[]>([]);
+  const boardAutoOpenedRef = useRef(false);
   const pendingExamplesRef = useRef<PendingExample[]>([]);
   const pendingRevealsRef = useRef<PendingReveal[]>([]);
   const lastRevealRef = useRef<{ at: number; transcriptLen: number }>({ at: 0, transcriptLen: 0 });
@@ -582,6 +584,15 @@ export default function App() {
   useEffect(() => {
     fullZonesRef.current = fullZones;
   }, [fullZones]);
+
+  // Start on the conversation, then let the board take over as soon as the
+  // tutor actually writes something. Manual show/hide always wins afterwards.
+  useEffect(() => {
+    if (!boardAutoOpenedRef.current && boardBlocks.length > 0) {
+      boardAutoOpenedRef.current = true;
+      setBoardCollapsed(false);
+    }
+  }, [boardBlocks.length]);
 
   /**
    * Replaces the board's blocks and drops any connector arrow whose block was
@@ -2434,6 +2445,8 @@ export default function App() {
     resetCoverage();
     setBoardBlocks([]);
     setBoardConnectors([]);
+    boardAutoOpenedRef.current = false;
+    setBoardCollapsed(true);
     setQuiz(null);
     void connect(apiKey);
   };
@@ -2471,65 +2484,66 @@ export default function App() {
   /* ---------------------------- Setup screen ---------------------------- */
   if (view === "setup") {
     return (
-      <main className="setup-screen min-h-dvh overflow-hidden bg-[#090a0c] text-white">
-        <div className="ambient ambient-one" />
-        <div className="ambient ambient-two" />
-
-        <header className="relative z-10 flex h-20 items-center justify-between px-6 sm:px-10">
+      <main className="setup-screen min-h-dvh overflow-x-hidden bg-[#090a0c] text-white">
+        <header className="setup-header">
           <div className="flex items-center gap-3">
             <MaalamLogo size="sm" />
             <span className="brand-wordmark" dir="ltr">
               maalam
             </span>
           </div>
-          <div className="setup-badge hidden sm:flex">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#34d6a4]" />
-            Darija Open Dataset
-          </div>
         </header>
 
         <section className="setup-grid relative z-10">
           <div className="setup-hero setup-enter">
-            <MaalamLogo size="lg" />
-            <p className="setup-eyebrow">معلّمك بالدارجة · صوت + سبورة</p>
+            <p className="setup-eyebrow">معلّمك بالدارجة · صوت وسبورة</p>
             <h1 className="setup-title">
-              <span dir="ltr">Maalam</span>
-              <small>معلّم</small>
+              <span>تعلّم بالدارجة.</span>
+              <span className="setup-title-accent">طبّق على السبورة.</span>
             </h1>
             <p className="setup-lead">
-              نفهمو الفكرة، نطبّقوها، ونرجعو ليها باش تبقى فالذاكرة. بالدارجة بالحروف العربية،
-              المصطلحات العلمية بالفرنسية، والشرح بالصوت وعلى السبورة.
+              شرح خطوة بخطوة، تمارين، ومراجعة من الذاكرة — بالدارجة المغربية
+              والمصطلحات العلمية بالفرنسية.
             </p>
             <ul className="setup-features">
               <li>
                 <Volume2 className="h-4 w-4" />
-                <span>يهضر معاك بالصوت وكيسمعك</span>
+                <span>صوت مباشر</span>
               </li>
               <li>
                 <GraduationCap className="h-4 w-4" />
-                <span>سبورة كتكتب وكترسم وقت الشرح</span>
+                <span>سبورة تفاعلية</span>
               </li>
               <li>
                 <Camera className="h-4 w-4" />
-                <span>صوّر التمرين ولا لسق صورة / PDF</span>
-              </li>
-              <li>
-                <Sparkles className="h-4 w-4" />
-                <span>أسئلة ذكية كتكشف الغلطات الشائعة</span>
+                <span>PDF وتمارين</span>
               </li>
             </ul>
-            <div className="mt-6">
-              <TeachingSettings preferences={teachingPreferences} onSave={setTeachingPreferences} />
-            </div>
+            <a
+              className="setup-doda"
+              href={DODA_REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span
+                className={`status-dot ${doda.sentences === "ready" ? "is-ready" : doda.sentences === "loading" ? "is-loading" : "is-error"}`}
+              />
+              <span>Darija Open Dataset</span>
+              <span className="setup-doda-count">{dodaSummary}</span>
+              <ExternalLink className="h-3 w-3" />
+            </a>
           </div>
 
           <div className="setup-card setup-enter">
-            <h2 className="setup-card-title">بدا الدرس</h2>
-            <p className="setup-card-sub">دخّل المفتاح ديالك وبدا دابا، بلا تسجيل.</p>
+            <div className="setup-card-head">
+              <span className="setup-card-kicker">جلسة جديدة</span>
+              <h2 className="setup-card-title">بدا الدرس</h2>
+              <p className="setup-card-sub">دخّل المفتاح ديالك وبدا دابا، بلا تسجيل.</p>
+            </div>
 
-            <form onSubmit={handleSetupSubmit} className="mt-6">
-              <label htmlFor="api-key" className="mb-3 block text-sm font-medium text-zinc-300">
-                maalam API key
+            <form onSubmit={handleSetupSubmit} className="setup-form">
+              <label htmlFor="api-key" className="setup-label">
+                Gemini API key
               </label>
               <div className={`key-field ${error ? "has-error" : ""}`} dir="ltr">
                 <KeyRound className="h-4 w-4 shrink-0 text-zinc-500" />
@@ -2543,7 +2557,6 @@ export default function App() {
                   placeholder="AIza..."
                   autoComplete="off"
                   spellCheck={false}
-                  autoFocus
                   className="min-w-0 flex-1 bg-transparent text-left text-sm text-white outline-none placeholder:text-zinc-600"
                 />
                 <button
@@ -2556,12 +2569,12 @@ export default function App() {
                 </button>
               </div>
 
-              {error && <p role="alert" className="mt-3 text-sm leading-6 text-red-400">{error}</p>}
+              {error && <p role="alert" className="setup-error">{error}</p>}
 
               <button
                 type="submit"
                 disabled={connectionStatus === "connecting" || !apiKey.trim()}
-                className="connect-button mt-5 w-full"
+                className="connect-button setup-connect"
               >
                 {connectionStatus === "connecting" ? (
                   <>
@@ -2577,50 +2590,25 @@ export default function App() {
               </button>
             </form>
 
-            <div className="mt-5 flex flex-col gap-3 text-xs leading-6 text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
-              <span className="flex items-center gap-2">
+            <div className="setup-privacy">
+              <span className="setup-privacy-text">
                 <LockKeyhole className="h-3.5 w-3.5" />
-                المفتاح ديالك كيبقا فهاد الصفحة و ما كيتسجّل حتى بلاصة.
+                المفتاح كيبقا فهاد الصفحة و ما كيتسجّل حتى بلاصة.
               </span>
               <a
                 href="https://aistudio.google.com/apikey"
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1.5 text-zinc-400 transition-colors hover:text-white"
+                className="setup-key-link"
               >
                 جيب API key
                 <ExternalLink className="h-3 w-3" />
               </a>
             </div>
 
-            <div className="doda-card mt-8">
-              <div className="flex items-center gap-2 text-xs font-semibold text-[#a3aeff]">
-                <BookOpen className="h-3.5 w-3.5" />
-                Darija Open Dataset
-                <span className={`status-dot ${doda.sentences === "ready" ? "is-ready" : doda.sentences === "loading" ? "is-loading" : "is-error"}`} />
-              </div>
-              <p className="mt-2 text-xs leading-6 text-zinc-400">
-                {doda.lexicon === "ready"
-                  ? `المعجم: ${formatNumber(doda.entryCount)} مدخل بالحروف العربية (${doda.liveCategories} ملفات).`
-                  : doda.lexicon === "loading"
-                    ? "المعجم كيتحمّل من GitHub…"
-                    : "المعجم: النسخة المدمجة."}{" "}
-                {doda.sentences === "ready"
-                  ? `الجمل: ${formatNumber(doda.sentenceCount)} جملة مراجَعة جاهزة للـ retrieval.`
-                  : doda.sentences === "loading"
-                    ? "الجمل (≈49k) كيتحمّلو فالخلفية…"
-                    : "الجمل: ما تحمّلوش، غانخدمو بالنسخة المدمجة."}
-              </p>
-              <a
-                href={DODA_REPO_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-zinc-500 transition-colors hover:text-white"
-                dir="ltr"
-              >
-                github.com/darija-open-dataset/dataset
-                <ExternalLink className="h-3 w-3" />
-              </a>
+            <div className="setup-card-settings">
+              <span>طريقة التعلّم</span>
+              <TeachingSettings preferences={teachingPreferences} onSave={setTeachingPreferences} />
             </div>
           </div>
         </section>
@@ -2667,8 +2655,8 @@ export default function App() {
         onClose={closeMediaPicker}
         onFile={handleAttachment}
       />
-      <header className="chat-header relative z-20 flex h-16 shrink-0 items-center justify-between px-4 sm:px-6">
-        <div className="flex items-center gap-3">
+      <header className="chat-header relative z-20 flex shrink-0 items-center justify-between px-4 sm:px-6">
+        <div className="flex items-center gap-2.5">
           <MaalamLogo size="sm" />
           <div>
             <div className="brand-wordmark is-header" dir="ltr">
@@ -2683,6 +2671,16 @@ export default function App() {
         </div>
 
         <div className="header-actions">
+          <button
+            type="button"
+            onClick={() => setBoardCollapsed((current) => !current)}
+            className={`header-icon-button ${!boardCollapsed ? "is-on" : ""}`}
+            aria-pressed={!boardCollapsed}
+            aria-label={boardCollapsed ? "ورّي السبورة" : "خبّي السبورة"}
+            title={boardCollapsed ? "ورّي السبورة" : "خبّي السبورة"}
+          >
+            <Presentation className="h-4 w-4" />
+          </button>
           <button
             type="button"
             onClick={() => setIsMuted((current) => !current)}
@@ -2711,11 +2709,10 @@ export default function App() {
           >
             <KeyRound className="h-4 w-4" />
           </button>
-          <div className="header-sep" aria-hidden="true" />
           <button
             type="button"
             onClick={() => setUseDodaRefs((current) => !current)}
-            className={`header-pill ${useDodaRefs ? "is-on" : ""}`}
+            className={`header-icon-button header-doda ${useDodaRefs ? "is-on" : ""}`}
             title={
               useDodaRefs
                 ? `DODa retrieval خدّام (${dodaSummary}). كليكي باش تحبسو.`
@@ -2724,8 +2721,7 @@ export default function App() {
             aria-pressed={useDodaRefs}
             aria-label={useDodaRefs ? "حبس المراجع اللغوية ديال DODa" : "شغّل المراجع اللغوية ديال DODa"}
           >
-            <BookOpen className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">DODa</span>
+            <BookOpen className="h-4 w-4" />
             <span
               className={`status-dot ${doda.sentences === "ready" ? "is-ready" : doda.sentences === "loading" ? "is-loading" : "is-error"}`}
             />
@@ -2734,12 +2730,11 @@ export default function App() {
       </header>
 
       <div className="lesson-stage">
-      <div className="lesson-stage-board">
+      <div className={`lesson-stage-board${boardCollapsed ? " is-collapsed" : ""}`}>
       <Blackboard
         blocks={boardBlocks}
         connectors={boardConnectors}
         collapsed={boardCollapsed}
-        onToggleCollapsed={() => setBoardCollapsed((current) => !current)}
         onClear={(zone) => {
           eraseBoard(zone);
         }}
@@ -2758,32 +2753,25 @@ export default function App() {
         {messages.length === 0 ? (
           <div className="empty-enter relative z-10 mx-auto flex min-h-full max-w-2xl flex-col items-center justify-center px-6 pb-20 text-center">
             <VoiceOrb active={isSpeaking} />
-            <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-3 py-1 text-xs text-[#a3aeff]">
-              <GraduationCap className="h-3.5 w-3.5 text-[#8b96ff]" />
-              <span>أستاذ بالدارجة + français scientifique · DODa</span>
-            </div>
-            <h1 className="mt-4 text-3xl font-medium text-zinc-100 sm:text-4xl">شنو بغيتي نشرح ليك اليوم؟</h1>
+            <h1 className="mt-6 text-3xl font-medium text-zinc-100 sm:text-4xl">شنو بغيتي نشرح ليك اليوم؟</h1>
             <p className="mt-3 max-w-md text-sm leading-7 text-zinc-400">
               اختار موضوع ولا كتب الهدف ديالك. نشرحو بشوية، تجرّب نتا، ونصحّحو بجوج.
               بالدارجة المغربية والمصطلحات العلمية بالفرنسية.
             </p>
 
-            <button
-              type="button"
-              onClick={openFilePicker}
-              disabled={connectionStatus !== "connected" || isResponding || imageBusy || docPhase === "reading" || docPhase === "analyzing"}
-              className="upload-card mt-8 w-full max-w-xl"
-            >
-              <span className="upload-card-icon">
-                <FileUp className="h-5 w-5" />
-              </span>
-              <span className="min-w-0 flex-1 text-start">
-                <strong>تصوّر ولا رفع صورة / PDF</strong>
-                <small>صوّر التمرين، اختار صورة أو PDF، ولا لسق صورة / PDF بـ Ctrl + V. الأستاذ كيقرا حتى المعادلات.</small>
-              </span>
-            </button>
+            <div className="empty-prompt-row">
+              <button
+                type="button"
+                onClick={openFilePicker}
+                disabled={connectionStatus !== "connected" || isResponding || imageBusy || docPhase === "reading" || docPhase === "analyzing"}
+                className="empty-upload-link"
+              >
+                <Paperclip className="h-3.5 w-3.5" />
+                رفع صورة / PDF
+              </button>
+            </div>
 
-            <div className="mt-3 grid w-full max-w-xl grid-cols-1 gap-2.5 text-start sm:grid-cols-2">
+            <div className="sample-grid">
               {SAMPLE_QUESTIONS.map((question) => (
                 <button
                   key={question.badge}
@@ -2823,27 +2811,19 @@ export default function App() {
                     commitBoardBlocks(next);
                     textareaRef.current?.focus();
                   }}
-                  className="group relative rounded-xl border border-white/8 bg-white/[0.03] p-3.5 text-start transition-all duration-200 hover:border-[#6e7aff]/50 hover:bg-white/[0.06] active:scale-[0.98]"
+                  className="sample-card group relative rounded-xl border border-white/8 bg-white/[0.03] p-3.5 text-start transition-all duration-200 hover:border-[#45d6a8]/40 hover:bg-white/[0.05] active:scale-[0.98]"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8b96ff]">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-[#45d6a8]">
                       {question.badge}
                     </span>
-                    <Sparkles className="h-3 w-3 text-zinc-500 transition-colors group-hover:text-[#a3aeff]" />
+                    <Sparkles className="h-3 w-3 text-zinc-500 transition-colors group-hover:text-[#45d6a8]" />
                   </div>
                   <p className="mt-1.5 text-xs font-medium text-zinc-200">{question.title}</p>
                   <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-zinc-500">{question.prompt}</p>
                 </button>
               ))}
             </div>
-
-            <p className="mt-6 text-[11px] text-zinc-600">
-              {doda.sentences === "ready"
-                ? `مبني على DODa: ${formatNumber(doda.sentenceCount)} جملة و ${formatNumber(doda.entryCount)} مدخل معجمي بالحروف العربية.`
-                : doda.sentences === "loading"
-                  ? "الجمل ديال DODa كيتحمّلو فالخلفية… الـ retrieval غايخدم من بعد."
-                  : `مبني على DODa: ${formatNumber(doda.entryCount)} مدخل معجمي بالحروف العربية.`}
-            </p>
           </div>
         ) : (
           <div className="relative z-10 mx-auto w-full max-w-3xl px-4 pb-16 pt-10 sm:px-6 sm:pt-14">
@@ -2853,10 +2833,10 @@ export default function App() {
                 className={`message-enter mb-10 flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 {message.role === "user" ? (
-                  <div className="max-w-[86%] rounded-[20px] rounded-ee-md bg-[#202229] px-4 py-3 text-[15px] leading-7 text-zinc-100 sm:max-w-[72%]">
+                  <div className="user-bubble max-w-[86%] rounded-[20px] rounded-ee-md bg-[#202229] px-4 py-3 text-[15px] leading-7 text-zinc-100 sm:max-w-[72%]">
                     {message.document && (
                       <div className="doc-chip mb-2">
-                        <FileText className="h-4 w-4 shrink-0 text-[#a3aeff]" />
+                        <FileText className="h-4 w-4 shrink-0 text-[#45d6a8]" />
                         <span className="min-w-0">
                           <span className="block truncate text-xs font-medium text-zinc-100" dir="auto">{message.document.name}</span>
                           <span className="block text-[10px] text-zinc-500">
@@ -2933,10 +2913,10 @@ export default function App() {
 
       <footer className="composer-area relative z-20 shrink-0 px-4 pb-3 sm:px-6 sm:pb-5">
         <div className="mx-auto max-w-3xl">
-          <div className="teaching-toolbar">
-            <TeachingSettings preferences={teachingPreferences} onSave={setTeachingPreferences} />
-            {messages.length > 0 &&
-              HELP_CHIPS.map((chip) => (
+          {messages.length > 0 && (
+            <div className="teaching-toolbar">
+              <TeachingSettings preferences={teachingPreferences} onSave={setTeachingPreferences} />
+              {HELP_CHIPS.map((chip) => (
                 <button
                   key={chip.id}
                   type="button"
@@ -2947,27 +2927,31 @@ export default function App() {
                   {chip.label}
                 </button>
               ))}
-            {messages.length > 0 && (
-              <select
-                aria-label="اختار مساعدة فالتعلّم"
-                className="learning-action-select"
-                value={tutorAction}
-                disabled={connectionStatus !== "connected" || isResponding || (Boolean(input.trim()) && tutorAction === "message")}
-                title={input.trim() && tutorAction === "message" ? "صيفط ولا مسح المسودة باش تختار طلب آخر" : "كيحضّر طلب فالرسالة، راجعو ومن بعد صيفطو"}
-                onChange={(event) => {
-                  const action = event.target.value;
-                  if (!isTutorAction(action)) return;
-                  setTutorAction(action);
-                  const choice = LEARNING_ACTIONS.find((item) => item.id === action);
-                  if (choice) setInput(choice.prompt);
-                  textareaRef.current?.focus();
-                }}
-              >
-                <option value="message" disabled>بغيت نجرّب...</option>
-                {LEARNING_ACTIONS.map((action) => <option key={action.id} value={action.id}>{action.label}</option>)}
-              </select>
-            )}
-          </div>
+              <details className="more-actions">
+                <summary className="help-chip more-trigger" title="أدوات إضافية" aria-label="أدوات إضافية">
+                  <MoreHorizontal className="h-4 w-4" />
+                </summary>
+                <div className="more-menu" role="menu">
+                  {LEARNING_ACTIONS.map((action) => (
+                    <button
+                      key={action.id}
+                      type="button"
+                      role="menuitem"
+                      disabled={connectionStatus !== "connected" || isResponding}
+                      onClick={(event) => {
+                        setTutorAction(action.id);
+                        setInput(action.prompt);
+                        textareaRef.current?.focus();
+                        event.currentTarget.closest("details")?.removeAttribute("open");
+                      }}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              </details>
+            </div>
+          )}
           {(error || connectionStatus !== "connected") && (
             <div role="status" className="connection-banner mb-3 flex items-center justify-between gap-4">
               <p className="text-xs text-amber-100/80" dir="auto">
@@ -3000,7 +2984,7 @@ export default function App() {
               ) : activeDocument ? (
                 <>
                   <div className="flex items-center gap-3">
-                    <FileText className="h-4 w-4 shrink-0 text-[#a3aeff]" />
+                    <FileText className="h-4 w-4 shrink-0 text-[#45d6a8]" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-medium text-zinc-100" dir="auto">
                         {activeDocument.analysis?.title && activeDocument.analysis.title !== "Document"
@@ -3208,8 +3192,8 @@ export default function App() {
               <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
             </button>
           </div>
-          <p className="mt-2 text-center text-[10px] text-zinc-600">
-            Enter باش تصيفط، Shift + Enter لسطر جديد، «كمّل» باش يواصل الشرح من فين وقف. maalam يقدر يغلط، تأكّد من المعلومات المهمّة.
+          <p className="composer-hint">
+            Enter يصيفط · Shift + Enter لسطر جديد · تحقّق من المعلومات المهمة.
           </p>
         </div>
       </footer>
