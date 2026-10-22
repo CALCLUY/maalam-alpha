@@ -98,6 +98,9 @@ summary:focus-visible {
 }
 
 .setup-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
   margin: 0;
   color: var(--ui-green);
   font-size: 0.76rem;
@@ -105,30 +108,52 @@ summary:focus-visible {
   letter-spacing: 0.02em;
 }
 
+.setup-eyebrow::before {
+  width: 0.36rem;
+  height: 0.36rem;
+  flex: none;
+  border-radius: 999px;
+  background: var(--ui-gold);
+  box-shadow: 0 0 12px rgba(244, 217, 124, 0.55);
+  content: "";
+}
+
 .setup-title {
   display: flex;
   flex-direction: column;
-  gap: 0.08em;
-  margin: 1rem 0 0;
+  align-items: flex-start;
+  gap: 0;
+  max-width: 34rem;
+  margin: 1.1rem 0 0;
   color: var(--ui-text);
-  font-family: "Sora", "IBM Plex Sans Arabic", sans-serif;
-  font-size: clamp(2.1rem, 4.4vw, 3.55rem);
-  font-weight: 620;
-  line-height: 1.24;
-  letter-spacing: -0.03em;
+  font-family: "IBM Plex Sans Arabic", "Sora", sans-serif;
+  font-size: clamp(2.2rem, 4.6vw, 3.7rem);
+  font-weight: 600;
+  line-height: 1.34;
+  letter-spacing: 0;
+  text-align: start;
   text-transform: none;
+  text-wrap: balance;
+}
+
+.setup-title span {
+  display: block;
 }
 
 .setup-title-accent {
+  margin-top: 0.16em;
   color: var(--ui-gold);
+  font-size: 0.88em;
+  line-height: 1.18;
 }
 
 .setup-lead {
   max-width: 32rem;
-  margin: 1.3rem 0 0;
+  margin: 1.15rem 0 0;
   color: var(--ui-muted);
   font-size: 0.98rem;
   line-height: 1.95;
+  text-wrap: pretty;
 }
 
 .setup-features {

@@ -42,6 +42,11 @@ body {
 .setup-screen,
 .chat-shell {
   position: relative;
+}
+
+/* Keep the chat stack self-contained. The setup screen must stay unisolated
+   so the glass card can sample the page atmosphere behind it. */
+.chat-shell {
   isolation: isolate;
 }
 
@@ -95,7 +100,6 @@ body {
 }
 
 /* ---- Shared glass ------------------------------------------------------- */
-.setup-card,
 .chat-header,
 .composer-wrap,
 .sample-card,
@@ -118,61 +122,90 @@ body {
 }
 
 /* ---- Setup -------------------------------------------------------------- */
-.setup-card {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  border: 1px solid var(--lg-line);
-  border-radius: 24px;
+/* A soft, high-contrast light field behind the card. It is what the glass
+   bends at the rim; without it refraction is invisible over a flat colour. */
+.setup-grid::before {
+  position: absolute;
+  top: 52%;
+  left: 1.25rem;
+  width: min(34rem, 52%);
+  height: min(36rem, 92%);
+  border-radius: 999px;
   background:
-    radial-gradient(130% 105% at 0% 0%, rgba(82, 229, 184, 0.12), transparent 48%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0.045) 34%, rgba(9, 25, 19, 0.52) 72%, rgba(255, 255, 255, 0.055) 100%);
-  box-shadow:
-    0 38px 100px rgba(0, 0, 0, 0.52),
-    0 0 100px rgba(35, 196, 147, 0.1),
-    inset 0 1px 0 var(--lg-highlight),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.28);
-  -webkit-backdrop-filter: blur(30px) saturate(165%);
-  backdrop-filter: blur(30px) saturate(165%);
+    radial-gradient(circle at 16% 16%, rgba(79, 235, 188, 0.62), transparent 23%),
+    radial-gradient(circle at 88% 74%, rgba(244, 217, 124, 0.4), transparent 22%),
+    radial-gradient(circle at 55% 52%, rgba(30, 151, 115, 0.3), transparent 60%),
+    radial-gradient(circle at 50% 86%, rgba(19, 94, 73, 0.35), transparent 62%);
+  filter: blur(18px);
+  content: "";
+  pointer-events: none;
+  transform: translateY(-50%);
+  z-index: -1;
 }
 
-.setup-card::before {
+.setup-hero {
+  position: relative;
+  z-index: 1;
+}
+
+/* iOS 26 clear glass: highly translucent and lensed. The per-element lens
+   keeps a constant-width, ray-traced bezel in real pixels. */
+.setup-card.liquid-glass {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  --lg-radius: 26px;
+  --lg-blur: 10px;
+  --lg-saturate: 175%;
+  --lg-brightness: 0.78;
+  --lg-contrast: 1.03;
+  --lg-rim-lit: 0.5;
+  --lg-rim-dark: 0.4;
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.13),
+    0 42px 110px rgba(0, 0, 0, 0.58),
+    0 0 100px rgba(35, 196, 147, 0.11);
+  animation: glass-card-enter 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.setup-card > .liquid-glass-tint {
+  background:
+    radial-gradient(120% 105% at 0% 0%, rgba(82, 229, 184, 0.065), transparent 52%),
+    radial-gradient(90% 80% at 100% 100%, rgba(244, 217, 124, 0.03), transparent 58%),
+    rgba(255, 255, 255, 0.075);
+}
+
+.setup-card > .liquid-glass-shine {
+  box-shadow:
+    inset 0 20px 22px -22px rgba(255, 255, 255, 0.36),
+    inset 0 -20px 22px -22px rgba(255, 255, 255, 0.28),
+    inset 1px 0 1px rgba(255, 255, 255, 0.1),
+    inset -1px 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.setup-card > .liquid-glass-shine::after {
   position: absolute;
   inset: 0;
   border-radius: inherit;
   background:
-    linear-gradient(130deg, rgba(255, 255, 255, 0.18), transparent 22%, transparent 72%, rgba(69, 214, 168, 0.14));
+    linear-gradient(118deg, rgba(255, 255, 255, 0.14), transparent 22%, transparent 74%, rgba(244, 217, 124, 0.07));
   content: "";
-  opacity: 0.55;
+  mix-blend-mode: screen;
   pointer-events: none;
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  padding: 1px;
-  z-index: 2;
 }
 
-.setup-card::after {
-  position: absolute;
-  top: -45%;
-  left: -35%;
-  width: 52%;
-  height: 190%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);
-  content: "";
-  pointer-events: none;
-  transform: rotate(18deg);
-  z-index: 0;
+.setup-card > .liquid-glass-content {
+  padding: 1.65rem;
 }
 
-.setup-card > * {
-  position: relative;
-  z-index: 1;
+@keyframes glass-card-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .setup-card-kicker {
@@ -689,7 +722,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .setup-enter,
-  .setup-card::after {
+  .setup-card.liquid-glass {
     animation: none;
   }
 
@@ -700,9 +733,23 @@ body {
   }
 }
 
+@media (max-width: 899px) {
+  .setup-grid::before {
+    top: 72%;
+    left: 50%;
+    width: 92%;
+    height: 28rem;
+    transform: translate(-50%, -50%);
+  }
+}
+
 @media (max-width: 640px) {
-  .setup-card {
-    border-radius: 20px;
+  .setup-card.liquid-glass {
+    --lg-radius: 20px;
+  }
+
+  .setup-card > .liquid-glass-content {
+    padding: 1.3rem;
   }
 
   .board-frame {

@@ -107,6 +107,7 @@ import {
   type BoardZone,
 } from "./board";
 
+import { LiquidGlass } from "@sohumsuthar/liquid-glass";
 import { QuizPanel } from "./quiz/QuizPanel";
 import type { QuizItem, QuizKind } from "./quiz/types";
 
@@ -2534,7 +2535,12 @@ export default function App() {
             </a>
           </div>
 
-          <div className="setup-card setup-enter">
+          <LiquidGlass
+            className="setup-card"
+            variant="clear"
+            lens
+            lensOptions={{ bezel: 20, refraction: 1.15, dispersion: 8 }}
+          >
             <div className="setup-card-head">
               <span className="setup-card-kicker">جلسة جديدة</span>
               <h2 className="setup-card-title">بدا الدرس</h2>
@@ -2610,7 +2616,7 @@ export default function App() {
               <span>طريقة التعلّم</span>
               <TeachingSettings preferences={teachingPreferences} onSave={setTeachingPreferences} />
             </div>
-          </div>
+          </LiquidGlass>
         </section>
       </main>
     );
