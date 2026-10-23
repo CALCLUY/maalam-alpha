@@ -2,7 +2,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import { Check, Copy, Download, Eraser, Expand, Presentation, Shrink } from "lucide-react";
+import { Check, Copy, Download, Eraser, Expand, Maximize2, Minimize2, Presentation, Shrink, Square } from "lucide-react";
 import { AnnotationLayer } from "./AnnotationLayer";
 import { ConnectorLayer } from "./ConnectorLayer";
 import { assignConnectorSides, connectorGutters } from "./connect";
@@ -1236,11 +1236,19 @@ export function Blackboard({
   onRequestErase,
   focus = false,
   onToggleFocus,
+  lectureActive = false,
+  lectureRemaining = null,
+  onStopLecture,
 }: {
   blocks: BoardBlock[];
   /** Larger board view (the chat transcript is hidden while it is on). */
   focus?: boolean;
   onToggleFocus?: () => void;
+  /** A continuous lecture is running: show its clock + stop control here too,
+   *  because chat is hidden while the board owns the screen. */
+  lectureActive?: boolean;
+  lectureRemaining?: string | null;
+  onStopLecture?: () => void;
   /** Cross-block flow / reference arrows (see board_connect). */
   connectors?: BoardConnector[];
   collapsed: boolean;
@@ -1255,7 +1263,71 @@ export function Blackboard({
   onRequestErase?: (zone?: BoardZone) => void;
 }) {
   const [notesState, setNotesState] = useState<"idle" | "copied" | "exporting" | "error">("idle");
+  const boardWrapRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [pseudoFullscreen, setPseudoFullscreen] = useState(false);
+  const fullscreenActive = isFullscreen || pseudoFullscreen;
   const hasNotes = useMemo(() => blocks.some((block) => block.type !== "question" && block.type !== "svg"), [blocks]);
+
+  useEffect(() => {
+    const syncFullscreen = () => {
+      const active = document.fullscreenElement === boardWrapRef.current;
+      setIsFullscreen(active);
+      if (active) setPseudoFullscreen(false);
+    };
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreen);
+  }, []);
+
+  useEffect(() => {
+    // Collapsing the board (or switching chats) must never leave the browser
+    // fullscreen on a hidden slate.
+    if (!collapsed) return;
+    setPseudoFullscreen(false);
+    if (document.fullscreenElement === boardWrapRef.current) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+  }, [collapsed]);
+
+  useEffect(() => {
+    if (!pseudoFullscreen) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setPseudoFullscreen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [pseudoFullscreen]);
+
+  const toggleFullscreen = async () => {
+    const node = boardWrapRef.current;
+    if (!node) return;
+    if (document.fullscreenElement === node) {
+      try {
+        await document.exitFullscreen();
+      } catch {
+        // The browser already left fullscreen.
+      }
+      return;
+    }
+    if (pseudoFullscreen) {
+      setPseudoFullscreen(false);
+      return;
+    }
+    try {
+      // Some in-app/automation browsers accept requestFullscreen() but never
+      // resolve or reject it. Race it with a short timeout and fall back to the
+      // fixed overlay when the element still is not fullscreen.
+      await Promise.race([
+        node.requestFullscreen(),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 700)),
+      ]);
+      if (document.fullscreenElement !== node) setPseudoFullscreen(true);
+    } catch {
+      // iPhone/iOS Safari does not expose element fullscreen: use a fixed
+      // viewport-sized overlay so the board still takes the whole screen.
+      setPseudoFullscreen(true);
+    }
+  };
 
   const copyNotes = async () => {
     const text = boardToNotes(blocks);
@@ -1315,11 +1387,21 @@ export function Blackboard({
   );
 
   return (
-    <div className={`board-wrap${focus ? " is-focus" : ""}`}>
+    <div
+      className={`board-wrap${focus ? " is-focus" : ""}${fullscreenActive ? " is-fullscreen" : ""}${pseudoFullscreen ? " is-pseudo-fullscreen" : ""}`}
+      ref={boardWrapRef}
+    >
       <div className="board-topbar">
         <div className="board-topbar-title">
           <Presentation className="h-4 w-4 text-[#ffe066]" />
           <span>السبورة</span>
+          {lectureActive && (
+            <span className="board-lecture-chip" role="status">
+              <span className="board-lecture-dot" aria-hidden="true" />
+              محاضرة
+              {lectureRemaining && <b dir="ltr">{lectureRemaining}</b>}
+            </span>
+          )}
           {fullZones.length > 0 && (
             <span className="board-full-badge" role="status">
               <Eraser className="h-3 w-3" />
@@ -1328,6 +1410,17 @@ export function Blackboard({
           )}
         </div>
         <div className="board-topbar-actions">
+          {!collapsed && lectureActive && onStopLecture && (
+            <button
+              type="button"
+              className="board-mini-button board-lecture-stop"
+              onClick={onStopLecture}
+              title="وقّف المحاضرة"
+              aria-label="وقّف المحاضرة"
+            >
+              <Square className="h-3 w-3" fill="currentColor" />
+            </button>
+          )}
           {!collapsed && hasNotes && (
             <>
               <button
@@ -1370,6 +1463,18 @@ export function Blackboard({
           {!collapsed && (
             <button
               type="button"
+              className={`board-mini-button${fullscreenActive ? " is-on" : ""}`}
+              onClick={() => void toggleFullscreen()}
+              aria-pressed={fullscreenActive}
+              title={fullscreenActive ? "خروج من ملء الشاشة" : "ملء الشاشة"}
+              aria-label={fullscreenActive ? "خروج من ملء الشاشة" : "ملء الشاشة"}
+            >
+              {fullscreenActive ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            </button>
+          )}
+          {!collapsed && (
+            <button
+              type="button"
               className={`board-mini-button${fullZones.length ? " is-erase-request" : ""}`}
               onClick={() => (onRequestErase ? onRequestErase() : onClear())}
               title={fullZones.length ? "امسح السبورة وكمّل" : "مسح السبورة"}
@@ -1380,6 +1485,30 @@ export function Blackboard({
           )}
         </div>
       </div>
+      {fullscreenActive && !collapsed && (
+        <div className="board-fullscreen-controls">
+          {lectureActive && onStopLecture && (
+            <button
+              type="button"
+              className="board-float-button is-stop"
+              onClick={onStopLecture}
+              title="وقّف المحاضرة"
+              aria-label="وقّف المحاضرة"
+            >
+              <Square className="h-3.5 w-3.5" fill="currentColor" />
+            </button>
+          )}
+          <button
+            type="button"
+            className="board-float-button"
+            onClick={() => void toggleFullscreen()}
+            title="خروج من ملء الشاشة"
+            aria-label="خروج من ملء الشاشة"
+          >
+            <Minimize2 className="h-4 w-4" />
+          </button>
+        </div>
+      )}
       {!collapsed && (
         <div
           className={`board-frame${erasing ? " is-erasing" : ""}`}

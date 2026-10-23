@@ -20,7 +20,7 @@ export const BOARD_WRITE_TOOL: FunctionDeclaration = {
     "question = a question you are asking the STUDENT right now: the whole question is written in BLUE chalk (its own reserved colour) with a 'Question :' label and a dashed rule, never boxed. ALWAYS write it here at the exact moment you ask it out loud, in zone='middle'. Write it ONLY in short, simple French (one short sentence, everyday words, no Arabic; math in $...$) even though you ask it aloud in Darija — e.g. 'Quelle est la partie réelle de $z = 3 + 2i$ ?'. It never erases anything on the board; it only replaces a previous pending question (one at a time). " +
     "takeaway = final answer/main takeaway, RED accent and automatically boxed. Red is reserved for final answers and specifically marked error-prone formula symbols only. If the takeaway IS an equation, write it as raw LaTeX exactly like a formula (e.g. (c)' = 0 as \\left(c\\right)' = 0) — never as plain characters; the board typesets it. " +
     "text and svg = white by default. Objectives use items as bullets. Leave color empty: the board enforces these semantic colors itself. " +
-    "A question write NEVER erases anything: it only replaces a previous pending question. When a zone is full the board does NOT erase itself and NOTHING is written: the tool answers board_full and you must ASK the student for permission to erase (in Darija), then STOP and wait. The learner erases the board themselves by pressing the «امسح وكمّل» button, which sends you 'continue' — only then call board_write again to resume the same point. Write in short, copyable chunks. " +
+    "A question write NEVER erases anything: it only replaces a previous pending question. In NORMAL tutoring, when a zone is full the board does NOT erase itself and NOTHING is written: the tool answers board_full and you must ASK the student for permission to erase (in Darija), then STOP and wait. The learner erases the board themselves by pressing the «امسح وكمّل» button, which sends you 'continue' — only then call board_write again to resume the same point. DURING CONTINUOUS LECTURE MODE, the app wipes the full zone automatically; do not ask, wait for the wipe, resend the same write once, and keep teaching. Write in short, copyable chunks. " +
     "PACING (ENFORCED): emit ONE board_write, then speak 2-3 sentences about exactly that line before the next write — never fire several writes back-to-back (no example + question + explanation in one burst); the board reveals each line as you speak about it. After your first write in a response, further writes are REFUSED with status 'paced' until you have spoken about what is already on the board: when that happens, speak first, then resend. A turn that writes without ANY speech gets you a forced speak-now reminder. Never send the same content twice: a 'duplicate' response means it is already there, so move on.",
   parameters: {
     type: Type.OBJECT,
@@ -76,7 +76,7 @@ export const BOARD_CLEAR_TOOL: FunctionDeclaration = {
   name: "board_clear",
   behavior: Behavior.NON_BLOCKING,
   description:
-    "Erase a zone or the whole board. The board NEVER erases itself: when a zone is full, board_write answers board_full and the learner must approve the erase with the «امسح وكمّل» button. Only call this after they have agreed (or when changing topic / when examples are no longer relevant).",
+    "Erase a zone or the whole board. In NORMAL tutoring, the board never erases itself: when a zone is full, board_write answers board_full and the learner must approve the erase with the «امسح وكمّل» button. Only call this after they have agreed (or when changing topic / when examples are no longer relevant). In CONTINUOUS LECTURE MODE you may clear a full or finished zone yourself and continue teaching without asking.",
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -256,7 +256,7 @@ export const LESSON_POINT_COMPLETE_TOOL: FunctionDeclaration = {
   name: "lesson_point_complete",
   behavior: Behavior.NON_BLOCKING,
   description:
-    "Mark the current PDF teaching point complete AFTER the learner has answered its check question and you have responded to that exact answer with feedback. Call ONLY when the learner's answer is correct or they have completed one supported retry; never mark complete before asking the check, before the student's reply, or when they remain confused/unanswered. This is the ONLY way to advance PDF coverage; never advance/restart the PDF from your own guess. After calling, STOP this turn — teach the next point only after the next learner input.",
+    "Mark the current PDF teaching point complete AFTER the learner has answered its check question and you have responded to that exact answer with feedback. Call ONLY when the learner's answer is correct or they have completed one supported retry; never mark complete before asking the check, before the student's reply, or when they remain confused/unanswered. In CONTINUOUS LECTURE MODE there is no check question: call this after explaining the point, then continue directly to the next point without stopping. This is the ONLY way to advance PDF coverage; never advance/restart the PDF from your own guess.",
   parameters: {
     type: Type.OBJECT,
     properties: {

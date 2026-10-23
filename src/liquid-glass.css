@@ -761,3 +761,498 @@ body {
     border-radius: 12px;
   }
 }
+
+/* ========================================================================== */
+/* Continuous lecture mode                                                    */
+/* ========================================================================== */
+.lecture-dock {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.6rem;
+  min-height: 1.9rem;
+  margin: 0 0.1rem 0.42rem;
+  direction: rtl;
+}
+
+.lecture-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+}
+
+.lecture-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.34rem;
+  height: 1.9rem;
+  padding: 0 0.68rem;
+  border: 1px solid rgba(244, 217, 124, 0.26);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(244, 217, 124, 0.11), rgba(244, 217, 124, 0.045));
+  color: var(--lg-gold);
+  font-size: 0.72rem;
+  font-weight: 700;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.11),
+    0 4px 16px rgba(0, 0, 0, 0.16);
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    transform 150ms ease;
+}
+
+.lecture-trigger:hover:not(:disabled),
+.lecture-trigger.is-open {
+  border-color: rgba(244, 217, 124, 0.5);
+  background:
+    linear-gradient(180deg, rgba(244, 217, 124, 0.2), rgba(244, 217, 124, 0.08));
+}
+
+.lecture-trigger:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.lecture-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.lecture-trigger svg:first-child {
+  color: #f7e3a1;
+}
+
+.lecture-settings-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.9rem;
+  border: 1px solid rgba(244, 217, 124, 0.26);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(244, 217, 124, 0.1), rgba(244, 217, 124, 0.04));
+  color: var(--lg-gold);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.1);
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+}
+
+.lecture-settings-trigger:hover:not(:disabled),
+.lecture-settings-trigger.is-open {
+  border-color: rgba(244, 217, 124, 0.5);
+  background:
+    linear-gradient(180deg, rgba(244, 217, 124, 0.2), rgba(244, 217, 124, 0.08));
+}
+
+.lecture-settings-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.lecture-popover {
+  position: absolute;
+  inset-inline-start: 0;
+  bottom: calc(100% + 0.55rem);
+  z-index: 60;
+  width: min(21rem, calc(100vw - 1.6rem));
+  padding: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 1.1rem;
+  background:
+    radial-gradient(130% 120% at 0% 0%, rgba(69, 214, 168, 0.13), transparent 48%),
+    linear-gradient(170deg, rgba(23, 45, 36, 0.98), rgba(7, 18, 13, 0.98));
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.13),
+    0 24px 70px rgba(0, 0, 0, 0.48);
+  -webkit-backdrop-filter: blur(24px) saturate(145%);
+  backdrop-filter: blur(24px) saturate(145%);
+  text-align: start;
+}
+
+.lecture-popover-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.lecture-popover-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--lg-gold);
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.lecture-popover-head h3 {
+  margin: 0.18rem 0 0;
+  color: var(--lg-ink);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.lecture-popover-copy {
+  margin: 0.55rem 0 0.75rem;
+  color: var(--lg-muted);
+  font-size: 0.72rem;
+  line-height: 1.75;
+}
+
+.lecture-duration-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.lecture-duration {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.22rem;
+  min-height: 2.4rem;
+  padding: 0.35rem 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--lg-muted);
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.lecture-duration strong {
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.lecture-duration span {
+  font-size: 0.58rem;
+  opacity: 0.78;
+}
+
+.lecture-duration:hover {
+  border-color: rgba(69, 214, 168, 0.3);
+  background: rgba(69, 214, 168, 0.08);
+  color: #d9fff2;
+}
+
+.lecture-duration.is-selected {
+  border-color: rgba(69, 214, 168, 0.52);
+  background:
+    linear-gradient(180deg, rgba(69, 214, 168, 0.22), rgba(29, 152, 119, 0.12));
+  color: #eafff8;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.14),
+    0 0 0 2px rgba(69, 214, 168, 0.08);
+}
+
+.lecture-seed-hint {
+  margin: 0.7rem 0;
+  color: var(--lg-faint);
+  font-size: 0.65rem;
+  line-height: 1.65;
+}
+
+.lecture-start-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.42rem;
+  width: 100%;
+  min-height: 2.5rem;
+  border: 1px solid rgba(69, 214, 168, 0.42);
+  border-radius: 0.8rem;
+  background:
+    linear-gradient(180deg, #4fe0b2, #23a982);
+  color: #042017;
+  font-size: 0.83rem;
+  font-weight: 800;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.28),
+    0 10px 26px rgba(20, 150, 112, 0.22);
+  transition:
+    filter 150ms ease,
+    transform 150ms ease;
+}
+
+.lecture-start-button:hover {
+  filter: brightness(1.05);
+}
+
+.lecture-start-button:active {
+  transform: scale(0.985);
+}
+
+.lecture-live-chip,
+.lecture-armed-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  min-height: 1.9rem;
+  padding: 0 0.68rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.lecture-live-chip {
+  border: 1px solid rgba(69, 214, 168, 0.34);
+  background: rgba(69, 214, 168, 0.11);
+  color: #c9f9e8;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.lecture-live-chip strong {
+  color: #fff;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.035em;
+}
+
+.lecture-live-dot,
+.board-lecture-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #52e8b8;
+  box-shadow: 0 0 0 0 rgba(82, 232, 184, 0.52);
+  animation: lecture-live-pulse 1.7s ease-out infinite;
+}
+
+.lecture-stop-button,
+.lecture-cancel-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  height: 1.9rem;
+  padding: 0 0.58rem;
+  border: 1px solid rgba(255, 133, 118, 0.26);
+  border-radius: 999px;
+  background: rgba(255, 117, 98, 0.08);
+  color: #ffb9ae;
+  font-size: 0.67rem;
+  font-weight: 600;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.lecture-stop-button:hover,
+.lecture-cancel-button:hover {
+  border-color: rgba(255, 133, 118, 0.5);
+  background: rgba(255, 117, 98, 0.15);
+}
+
+.lecture-armed-chip {
+  border: 1px solid rgba(244, 217, 124, 0.3);
+  background: rgba(244, 217, 124, 0.08);
+  color: #f8e9ad;
+}
+
+.lecture-armed-chip svg {
+  color: var(--lg-gold);
+}
+
+.lecture-cancel-button {
+  border-color: rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--lg-muted);
+}
+
+.lecture-dock-note {
+  color: var(--lg-faint);
+  font-size: 0.62rem;
+  line-height: 1.5;
+}
+
+.board-lecture-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  margin-inline-start: 0.2rem;
+  padding: 0.16rem 0.44rem;
+  border: 1px solid rgba(69, 214, 168, 0.26);
+  border-radius: 999px;
+  background: rgba(69, 214, 168, 0.09);
+  color: #c9f9e8;
+  font-size: 0.62rem;
+  font-weight: 600;
+}
+
+.board-lecture-chip b {
+  color: #fff;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
+.board-mini-button.is-on {
+  border-color: rgba(69, 214, 168, 0.3);
+  background: rgba(69, 214, 168, 0.1);
+  color: #9fe9cf;
+}
+
+.board-mini-button.board-lecture-stop {
+  border-color: rgba(255, 133, 118, 0.24);
+  color: #ffb9ae;
+}
+
+@keyframes lecture-live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(82, 232, 184, 0.48);
+  }
+  70% {
+    box-shadow: 0 0 0 0.42rem rgba(82, 232, 184, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(82, 232, 184, 0);
+  }
+}
+
+/* ========================================================================== */
+/* True browser fullscreen board                                              */
+/* ========================================================================== */
+.board-wrap.is-pseudo-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+}
+
+body:has(.board-wrap.is-pseudo-fullscreen) {
+  overflow: hidden;
+}
+
+.board-wrap:fullscreen,
+.board-wrap.is-pseudo-fullscreen {
+  flex: none;
+  width: 100vw;
+  max-width: 100vw;
+  height: 100dvh;
+  min-height: 100dvh;
+  margin: 0;
+  padding: 0.55rem 0.7rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.1rem;
+  overflow: hidden;
+  border-radius: 0;
+  background:
+    radial-gradient(70rem 45rem at 20% -20%, rgba(30, 170, 127, 0.16), transparent 58%),
+    radial-gradient(55rem 34rem at 100% 110%, rgba(244, 217, 124, 0.07), transparent 60%),
+    #06100c;
+}
+
+.board-wrap:fullscreen .board-topbar,
+.board-wrap.is-pseudo-fullscreen .board-topbar {
+  /* Immersive mode: no chrome. The floating controls carry the exit action. */
+  display: none;
+}
+
+.board-fullscreen-controls {
+  position: absolute;
+  top: 0.7rem;
+  inset-inline-end: 0.8rem;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.board-float-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(6, 16, 12, 0.52);
+  color: rgba(233, 255, 247, 0.85);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  opacity: 0.5;
+  transition:
+    opacity 160ms ease,
+    background 160ms ease,
+    border-color 160ms ease;
+}
+
+.board-fullscreen-controls:hover .board-float-button,
+.board-float-button:focus-visible {
+  opacity: 1;
+}
+
+.board-float-button:hover {
+  border-color: rgba(69, 214, 168, 0.42);
+  background: rgba(13, 38, 29, 0.78);
+}
+
+.board-float-button.is-stop {
+  border-color: rgba(255, 133, 118, 0.35);
+  color: #ffb9ae;
+}
+
+@media (hover: none) {
+  .board-float-button {
+    opacity: 0.92;
+  }
+}
+
+.board-wrap:fullscreen .board-frame,
+.board-wrap.is-pseudo-fullscreen .board-frame {
+  flex: 1 1 0;
+  width: 100%;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  min-height: 0;
+  aspect-ratio: auto;
+  border-radius: 1.1rem;
+}
+
+.board-wrap:fullscreen .board-zones,
+.board-wrap:fullscreen .board-zones.board-zones-merged,
+.board-wrap.is-pseudo-fullscreen .board-zones,
+.board-wrap.is-pseudo-fullscreen .board-zones.board-zones-merged {
+  height: 100%;
+}
+
+@media (max-width: 640px) {
+  .lecture-dock-note {
+    display: none;
+  }
+
+  .lecture-popover {
+    width: min(19rem, calc(100vw - 1.2rem));
+  }
+
+  .board-wrap:fullscreen,
+.board-wrap.is-pseudo-fullscreen {
+    padding: 0.35rem 0.35rem 0.45rem;
+  }
+
+  .board-wrap:fullscreen .board-frame,
+.board-wrap.is-pseudo-fullscreen .board-frame {
+    border-radius: 0.8rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lecture-live-dot,
+  .board-lecture-dot {
+    animation: none;
+  }
+}

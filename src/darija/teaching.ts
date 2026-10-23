@@ -13,7 +13,8 @@ export type TutorAction =
   | "doc_start"
   | "doc_lesson"
   | "doc_exercises"
-  | "doc_quiz";
+  | "doc_quiz"
+  | "lecture";
 
 export type TeachingPreferences = {
   mode: TeachingMode;
@@ -95,6 +96,19 @@ const ACTION_INSTRUCTIONS: Record<TutorAction, string> = {
     "Work through the uploaded PDF's exercises in the PDF's order unless the learner chose one (a chosen exercise overrides the coverage order for this turn). FIRST put the exercise's map on the board before solving: its exact label as a heading (type='heading', content='Exercice 1' — the PDF's own numbering) and then each question as its own line (type='text', content='1) <short exact French statement, math in $...$>', then '2) …'), one write per line with 2-3 Darija sentences spoken between lines (silent write stacks are refused as 'paced'). Keep the list stable while solving — name the question ('دابا نحلو السؤال 2') and put the steps/final answer under it, never rewrite or renumber it. After the map, this turn: read the chosen exercise's statement faithfully (original data and notation, explained in Darija), identify what is given and what is asked, connect it to the lesson concept it uses, then ask the learner for the FIRST step only (a plan/argument for humanities, a transformation for languages, a trace for CS) and wait. Do not reveal the answer_key. If the exercise matches an uncovered [VOX-COVERAGE] exercise point, that point counts as the current one.",
   doc_quiz:
     "Quiz the learner on the uploaded PDF. Ask ONE retrieval or application question based on the document's objectives, key concepts, formulas or exercises (cite the page), without giving the answer, then wait. Across turns, vary question types and prioritize concepts the learner struggled with.",
+  lecture:
+    "CONTINUOUS LECTURE MODE. The learner pressed the lecture button: produce a timed explainer lecture, not a tutoring exchange. " +
+    "Tell the WHOLE lecture as ONE story with a spine: hook (a concrete situation, a surprising fact, or a short everyday Moroccan image) -> the problem it creates -> the failed obvious attempt -> the key idea that fixes it -> a worked example -> a twist or edge case -> resolution. " +
+    "In the first segment, write that spine on the board as short French keywords (title + Hook / Problème / Idée clé / Exemple / Twist) and follow it in every later segment; it is written once, never rewritten. " +
+    "Never open with a definition and never read an outline aloud: ban «اليوم غادي نتعلمو…», «غادي نشرحو ثلاث حوايج…», and mechanical «أولاً… ثانياً… ثالثاً…» enumeration. Start inside a situation and name the concept only once the situation makes it necessary. " +
+    "Speak in long, flowing Darija audio with French scientific terms; use connective phrases like «المهم…»، «دابا شوف…»، «ولكن هنا كاين مشكل…»، «وهادشي علاش…» so every sentence pulls the next one. " +
+    "Rhetorical questions are welcome, but answer them yourself in the very next sentence — never wait for the learner's reply. Reach for concrete analogies from daily life (souk, football, cooking, taxi, phone…) whenever an idea is abstract; one strong analogy beats three weak ones. " +
+    "Keep the explanation flowing in one continuous audio stretch; do not ask the learner anything, do not wait for an answer, do not use ask_interactive, and do not write a board question. " +
+    "Move through the topic in a deliberate sequence (idea -> why it works -> worked example -> the next idea). Use the board as the lecture slide: write each formal French reference/step while you speak its reason, and keep speaking between writes. " +
+    "If the board is full, clear the relevant zone yourself with board_clear and continue; never stop for permission in lecture mode. " +
+    "If a PDF is active, teach its points in order, mark each point complete after explaining it, and continue to the next point without asking a check question. " +
+    "Use the learner's question/image/PDF as the lecture seed. If there is no new seed, continue the current topic from exactly where the previous lecture segment stopped. " +
+    "The app sends the next segment automatically when this response ends; never announce that, never say goodbye, and close each segment mid-momentum with a bridge into what comes next — never with a question, a goodbye, or an offer to continue.",
 };
 
 export function isTutorAction(value: string): value is TutorAction {
@@ -421,12 +435,22 @@ export function buildTutorTurnContext(
   preferences: TeachingPreferences,
   action: TutorAction = "message",
 ): string {
+  const isLecture = action === "lecture";
+  const turnInstruction = isLecture
+    ? `[CONTINUOUS LECTURE FLOW]
+This response is ONE segment of a recorded explainer lecture. The one-idea / 3-7 sentence / hard-stop turn discipline from the teaching protocol is SUSPENDED for this turn. Tell it as ONE continuing story (hook -> problem -> idea -> worked example -> twist), never as a list of definitions: pick up the narrative thread exactly where it stopped, move it forward, explain WHY the idea works, land it with a concrete example or a daily-life analogy, and flow into the next beat while time remains. Do NOT ask the learner any question, do not wait for an answer, do not use ask_interactive, and do not write a question block. Never say "واش فهمتي؟", "قولي ليا", "نجربو", or ask the learner to do anything. If you finish a point, start the next one yourself. Do not say goodbye or announce that another segment will follow — bridge into the next idea instead.`
+    : `[SINGLE IDEA + HARD STOP]
+This response covers ONE teachable idea or ONE problem step only. Use 2-6 short spoken sentences in ONE continuous audio stretch, then STOP and wait. Never resume with a second speech burst after a board tool. Never repeat a sentence you already said in this turn or the previous one — if it is already spoken, move on. If you ask a question, it is the final sentence — do not answer it, summarize, or keep explaining.`;
+
+  const boardFullRule = isLecture
+    ? `During LECTURE MODE a full zone is automatic: the app wipes that zone and tells you it is being wiped. Do NOT ask the learner for permission, do NOT stop, wait for the wipe, resend the same write ONCE, and continue the lecture. You may also call board_clear yourself when a section is finished and the next idea needs room.`
+    : `If a write returns "board_full", stop and ask permission in Darija to erase first — never scroll past a full board and keep writing.`;
+
   return `[VOX-TUTOR]
 ${JSON.stringify({ ...preferences, action })}
 ${LEVEL_INSTRUCTIONS[preferences.level]}
 ${ACTION_INSTRUCTIONS[action]}
-[SINGLE IDEA + HARD STOP]
-This response covers ONE teachable idea or ONE problem step only. Use 2-6 short spoken sentences in ONE continuous audio stretch, then STOP and wait. Never resume with a second speech burst after a board tool. Never repeat a sentence you already said in this turn or the previous one — if it is already spoken, move on. If you ask a question, it is the final sentence — do not answer it, summarize, or keep explaining.
+${turnInstruction}
 
 [DISCIPLINE FIT]
 Silently identify the current subject and use its playbook from the teaching protocol (maths, experimental sciences, biology/geology, humanities, languages, applied/technical). Fit the board representation, the evidence and the check question to that subject. Never announce the switch or force a formula/derivation template onto a literary or language topic.
@@ -452,10 +476,83 @@ Structure EVERY unit of new content on the board top-to-bottom in this order:
 4. formula (white, boxed only when it is THE key formula to memorize) + REQUIRED arrows/circles on its variables.
 5. takeaway (red, boxed) = the final result or key point.
 Questions (blue) go where they are asked. Right zone = darija examples only, when spoken.
-Never write a block without its place in this hierarchy: no orphan paragraphs, no mixed topics in one block. If a write returns "board_full", stop and ask permission in Darija to erase first — never scroll past a full board and keep writing.
+Never write a block without its place in this hierarchy: no orphan paragraphs, no mixed topics in one block. ${boardFullRule}
 [/BOARD ↔ SPEECH CONTRACT]
 Apply to this turn; keep Arabic-script Darija and French technical terms. Do not read this metadata aloud.
 [/VOX-TUTOR]`;
+}
+
+export type LectureContextOptions = {
+  durationMinutes: number;
+  remainingMs: number;
+  segment: number;
+  hasDocument: boolean;
+  boardEmpty: boolean;
+};
+
+/**
+ * Per-segment instructions for the continuous lecture mode. This is deliberately
+ * stronger than the normal tutor turn policy: a lecture must not stop for a
+ * question, and the app keeps sending the next segment until the timer ends.
+ */
+export function buildLectureContext({
+  durationMinutes,
+  remainingMs,
+  segment,
+  hasDocument,
+  boardEmpty,
+}: LectureContextOptions): string {
+  const remainingMinutes = Math.max(0, Math.ceil(remainingMs / 60_000));
+  // Wrap at ~25% of the lecture, clamped: 1-minute lectures get a 20s ending,
+  // long lectures a 2.5-minute one. With 1/2-minute options the old flat 2.5min
+  // threshold marked the whole lecture as an ending.
+  const wrapAt = Math.max(20_000, Math.min(150_000, durationMinutes * 60_000 * 0.25));
+  const wrapNow = remainingMs <= wrapAt;
+  const act = wrapNow
+    ? "ACT 3 — LAND THE STORY: resolve the thread that is open right now, give the compact synthesis and the essential takeaways, and finish naturally. Do not open brand-new material."
+    : segment === 0
+      ? "ACT 1 — HOOK + PROBLEM: open on the learner's topic (or the PDF's first point) with the hook, then reveal the problem the topic exists to solve, and set up the key idea. Do not rush into details or definitions."
+      : "ACT 2 — DEVELOPMENT: develop the key idea through its scenes — how and why it works, a worked example, then the next difficulty it creates. Resolve any thread left open in the previous segment before moving on.";
+  const firstSegmentRule = wrapNow
+    ? ""
+    : segment === 0
+      ? "- FIRST SEGMENT: before explaining, put the story spine on the board as SHORT French keywords: the topic as a heading, then one line each for Hook / Problème / Idée clé / Exemple / Twist (clear a zone first if the board still holds older material). Then tell the story following that spine. It is written once — later segments follow it WITHOUT rewriting it."
+      : "- LATER SEGMENT: the story spine written in the first segment is still on the board — follow it. Continue from the EXACT beat where you stopped: do not recap from the beginning, do not greet, and do not announce that the lecture is continuing.";
+  return `[VOX-LECTURE]
+CONTINUOUS LECTURE MODE — ${durationMinutes} minute explainer video.
+This overrides the normal tutoring turn discipline: do not ask the learner anything, do not wait for answers, do not use ask_interactive, and do not stop after one idea. Keep a natural, continuous teacher voice in Darija (Arabic script) with French scientific terms.
+LECTURE SEGMENT: ${segment + 1}. Remaining time: about ${remainingMinutes} minute(s).
+STORYTELLING — the lecture is ONE story, never a list of facts (this is what makes it feel alive):
+- The whole lecture follows a three-act story, in order:
+  ACT 1: the hook + the problem the topic exists to solve.
+  ACT 2: the key idea and why it works, through scenes (failed attempt -> the fix -> worked example -> the next difficulty).
+  ACT 3: the twist / edge case, the compact resolution, the takeaways.
+- THIS SEGMENT: ${act}
+${firstSegmentRule}
+- Concrete before abstract: name a concept only AFTER a situation makes it necessary. Never open with a definition or with an announcement of the plan — no «اليوم غادي نتعلمو…», no «غادي نشرحو ثلاث حوايج…», no mechanical «أولاً… ثانياً… ثالثاً…» enumeration. A story is not an outline read aloud.
+- Speak vivid, concrete Darija; mix short punchy sentences with longer ones, and use connectors («المهم…»، «دابا شوف…»، «ولكن هنا كاين مشكل…»، «وهادشي علاش…»، «دابا شوف واش…») so every sentence pulls the next one.
+- Daily-life analogies (souk, football, cooking, taxi, phone…) make abstract ideas land. One strong analogy beats three weak ones.
+- Rhetorical questions are welcome — answer each one yourself in the very next sentence. Never pause for the learner.
+- Every segment must advance the story: no recaps, no repeating the previous segment's sentences, and no «كما قلنا من قبل» beyond one short connective clause.
+- Close the segment mid-momentum with a bridge into what comes next («ولكن باقي كاين حاجة…»، «وهاد الحاجة هي اللي غادي نشوفو دابا…»). Never end on a question, a goodbye, or an offer to continue.
+- Tone to imitate (the feel, not a script to read): «تخيّل معايا: عندك موبايل وكتشارجيه، ولكن كل مرة كيطفى قبل ما يسالي الشارج. علاش؟ كاين شي حاجة كتخوا الطاقة بلا ما تحس بيها. نفس الحاجة كتصرا هنا…»
+- ${wrapNow ? "This is the FINAL stretch: land the story — resolve the current thread, give a compact synthesis and the essential takeaways, and finish naturally. Do not open brand-new material." : "Keep the story moving through new material until the segment ends; the app asks you to continue automatically."}
+BOARD DURING THE LECTURE:
+- The board is your presentation slide. Keep writing formal French definitions, formulas and worked steps as you explain their reasons in Darija.
+- Speak between writes; never fill the board in silence.
+- If a board write returns board_full, the app wipes that zone automatically. Do not ask permission and do not stop: wait for the wipe, resend the write once, and continue. You may also call board_clear yourself when a section is finished and you need room.
+- ${boardEmpty ? "The board is empty. Start with the lecture heading and the first useful reference line." : "The board already contains earlier lecture material. Continue from it; clear a zone only when it is genuinely full or the previous section is complete."}
+${hasDocument ? `PDF LECTURE:
+- A PDF is active. Follow [VOX-LECTURE-COVERAGE] and teach its points in order, without asking the document's check questions.
+- After explaining a point's definition, why it matters, and its example, call lesson_point_complete for that point and continue immediately into the next point.
+- Never restart the PDF, never jump backwards, and never stop for the learner's answer during the lecture.
+` : ""}HARD RULES:
+1) No questions to the learner — not even "واش فهمتي؟" or "واش نكملو؟".
+2) No interactive quiz panel and no blue question block.
+3) Do not end with an offer to continue; the app sends the next segment.
+4) One continuous audio stretch per segment; do not produce a second speech burst after a board tool.
+5) Keep the lesson coherent: each new idea must connect explicitly to the previous one.
+[/VOX-LECTURE]`;
 }
 
 type HistoryMessage = {

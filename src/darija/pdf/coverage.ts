@@ -111,6 +111,39 @@ export function buildCoverageContext(
 }
 
 /**
+ * Continuous-lecture version of the coverage block. It keeps the same ordered
+ * curriculum, but removes the answer-gated check question: the tutor explains a
+ * point, marks it complete, and immediately continues to the next one.
+ */
+export function buildLectureCoverageContext(
+  points: LessonPoint[],
+  coveredIds: readonly string[],
+  currentId: string | null,
+): string {
+  if (!points.length) return "";
+  const covered = new Set(coveredIds);
+  const current = points.find((point) => point.id === currentId && !covered.has(point.id))
+    ?? nextUncoveredPoint(points, coveredIds);
+
+  const lines = ["[VOX-LECTURE-COVERAGE]", `Progress is internal UI metadata only: ${covered.size}/${points.length}. NEVER say these numbers or IDs aloud.`];
+  if (!current) {
+    lines.push("ALL PDF POINTS ARE COVERED. Continue the lecture with a compact synthesis, the key exam takeaways, and one final worked example or transfer case. Do not ask the learner anything and do not restart the document.");
+    lines.push("[/VOX-LECTURE-COVERAGE]");
+    return lines.join("\n");
+  }
+  lines.push(`CURRENT POINT: ${current.id} — ${current.title}${current.pages ? ` (p.${current.pages})` : ""} [${current.kind}]`);
+  if (current.summary) lines.push(`Content: ${clip(current.summary, 600)}`);
+  lines.push("LECTURE MODE: teach this point now, in order, as part of a continuous lecture. Give its exact French reference on the board, explain it in Darija, give the document's example (or a small one), and move on. Do NOT ask a check question and do NOT wait for the learner. When the point is explained, call lesson_point_complete(pointId=\"<current id>\") and continue directly into the next point in the same lecture.");
+  const upcoming = points.filter((point) => !covered.has(point.id) && point.id !== current.id);
+  if (upcoming.length) lines.push(`Still to come (internal only; NEVER read this list aloud): ${upcoming.map((point) => `${point.id} ${point.title}`).join(" · ")}`);
+  else lines.push("This is the last uncovered point. After explaining it, call lesson_point_complete, then continue with a final synthesis for the rest of the lecture.");
+  if (covered.size) lines.push(`Already taught (internal only; do not repeat): ${points.filter((point) => covered.has(point.id)).map((point) => point.id).join(", ")}.`);
+  lines.push("Board hierarchy for every point: heading → definition → numbered steps → key formula with proactive arrows/circles → takeaway. Keep speaking while you write.");
+  lines.push("[/VOX-LECTURE-COVERAGE]");
+  return lines.join("\n");
+}
+
+/**
  * Post-check context: the point remains current until the learner answers and
  * Vox gives feedback. This prevents auto-advancing/restarting the PDF at the top.
  */
