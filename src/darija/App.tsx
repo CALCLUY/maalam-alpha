@@ -213,6 +213,17 @@ const AUDIO_RESUME_LEAD = 0.25;
 /** How often streaming transcription may re-render the app while audio plays. */
 const TRANSCRIPT_FLUSH_MS = 80;
 /** If a turn goes completely silent this long, release it so the UI never locks. */
+type SubmitTurnOptions = {
+  documentContext?: string;
+  document?: ChatMessage["document"];
+  boardNote?: string;
+  image?: LiveImage;
+  lectureContext?: string;
+  hideUserMessage?: boolean;
+  preservePlayback?: boolean;
+  coverage?: boolean;
+};
+
 const RESPONSE_WATCHDOG_MS = 25_000;
 
 /** Debug ring buffer of what the Live stream actually sends (mime type, cadence,
@@ -744,6 +755,20 @@ export default function App() {
   const lectureContinueRef = useRef<() => void>(() => undefined);
   const lectureReconnectAttemptsRef = useRef(0);
   const lectureSendFailuresRef = useRef(0);
+  /** First lecture turn waiting for the lecture-mode session to come up. */
+  const lectureSeedRef = useRef<{ text: string; options: SubmitTurnOptions } | null>(null);
+  /** True while the live session still carries the lecture system instruction. */
+  const sessionNeedsNormalRebuildRef = useRef(false);
+  /** What the CURRENT session was built with (set when connect() starts). */
+  const sessionIsLectureRef = useRef(false);
+  /** A learner turn that arrived right after a lecture: sent once the normal
+   *  session is back (state so the handoff effect re-runs). */
+  const [pendingNormalTurn, setPendingNormalTurn] = useState<{
+    text: string;
+    action: TutorAction;
+    options: SubmitTurnOptions;
+  } | null>(null);
+  const pendingNormalTakenRef = useRef(false);
   const lectureScheduleRef = useRef<(delay?: number) => void>(() => undefined);
   const lectureAutoTimerRef = useRef<number | null>(null);
   /** True when the last segment sent was the instructed wrap-up: after it
@@ -891,6 +916,8 @@ export default function App() {
   const audioMimesSeenRef = useRef(new Set<string>());
   /** Last time any Live server frame arrived — watchdog for stuck turns. */
   const lastServerActivityRef = useRef(0);
+  /** Whether ANY server frame arrived for the turn currently in flight. */
+  const turnSawServerActivityRef = useRef(false);
   const activeSourcesRef = useRef(new Set<AudioBufferSourceNode>());
   /** Total scheduled audio duration so we can gauge speech progress for reveal pacing. */
   const scheduledDurationRef = useRef(0);
@@ -1277,11 +1304,16 @@ export default function App() {
     pendingAudioChunksRef.current = [];
     setIsResponding(false);
     if (lectureActiveRef.current) {
-      // Any finalized segment with no text and no audio is a failed continuation.
-      // Manual stop/disconnect clear lectureActiveRef BEFORE finishing the turn,
-      // so only genuine silent/stuck segments reach this counter.
-      if (!text && !audioChunks.length) lectureEmptyTurnsRef.current += 1;
-      else lectureEmptyTurnsRef.current = 0;
+      // Only a turn where the server produced NOTHING AT ALL counts as a failed
+      // continuation: a stall we cut ourselves (the server was alive but slow to
+      // start, e.g. a heavy PDF context) must not push the lecture toward its
+      // stop guard. Manual stop/disconnect clear lectureActiveRef before
+      // finishing the turn, so only genuine silent/stuck turns reach this counter.
+      if (!text && !audioChunks.length) {
+        if (!turnSawServerActivityRef.current) lectureEmptyTurnsRef.current += 1;
+      } else {
+        lectureEmptyTurnsRef.current = 0;
+      }
     }
 
     // The turn did things on the board but produced ZERO speech: the student
@@ -2035,6 +2067,9 @@ export default function App() {
       sentenceCount: index?.size ?? 0,
       liveCategories: lexicon?.liveCategories.length ?? 0,
       teaching: teachingPreferences,
+      // A lecture runs on a rebuilt session whose SYSTEM instruction replaces the
+      // interactive tutoring loop (ask + wait) with the continuous lecture protocol.
+      mode: lectureActiveRef.current ? "lecture" : "tutor",
     });
   }, [teachingPreferences]);
 
@@ -2045,6 +2080,9 @@ export default function App() {
         setError("دخّل maalam API key باش تكمّل.");
         return;
       }
+      // The system instruction is fixed at session build time: remember which mode
+      // this session is being built with.
+      sessionIsLectureRef.current = lectureActiveRef.current;
 
       ensureAudio();
       stopAudio();
@@ -2083,6 +2121,7 @@ export default function App() {
             onmessage: (message) => {
               if (connectionId !== connectionIdRef.current) return;
               lastServerActivityRef.current = Date.now();
+              turnSawServerActivityRef.current = true;
               if (message.goAway) {
                 // The server is winding the session down. Do not wait for the
                 // socket to die mid-sentence: end the turn and hand the learner
@@ -2256,18 +2295,20 @@ export default function App() {
   const submitTurn = (
     text: string,
     action: TutorAction,
-    options: {
-      documentContext?: string;
-      document?: ChatMessage["document"];
-      boardNote?: string;
-      image?: LiveImage;
-      lectureContext?: string;
-      hideUserMessage?: boolean;
-      preservePlayback?: boolean;
-      coverage?: boolean;
-    } = {},
+    options: SubmitTurnOptions = {},
   ): boolean => {
     if (!text || !canSubmitTurn() || !sessionRef.current) return false;
+
+    // POST-LECTURE HANDOFF: the live session still carries the lecture system
+    // instruction. The first normal turn after a lecture must run on a rebuilt
+    // session, so stash it and reconnect; the handoff effect sends it on "connected".
+    if (!lectureActiveRef.current && sessionNeedsNormalRebuildRef.current) {
+      sessionNeedsNormalRebuildRef.current = false;
+      pendingNormalTakenRef.current = false;
+      setPendingNormalTurn({ text, action, options });
+      void connect(apiKey);
+      return true;
+    }
 
     // BARGE-IN: a learner message always wins. Close (and keep for replay) the
     // answer currently being spoken, cut its audio, then start the new turn.
@@ -2433,7 +2474,10 @@ export default function App() {
         parts.push({ inlineData: { mimeType: options.image.mimeType, data: options.image.data } });
       }
       freshTurnPendingRef.current = true;
-      staleAudioUntilRef.current = Date.now() + 300;
+      turnSawServerActivityRef.current = false;
+      // Auto-continue segments keep the previous audio tail: only a short guard is
+      // needed there, so the new segment's first syllables are not clipped.
+      staleAudioUntilRef.current = Date.now() + (options.preservePlayback ? 120 : 300);
       sessionRef.current.sendClientContent({ turns: [{ role: "user", parts }], turnComplete: true });
       documentRemovedRef.current = false;
       return true;
@@ -2539,35 +2583,35 @@ export default function App() {
     if (mediaNoticeTimerRef.current !== null) window.clearTimeout(mediaNoticeTimerRef.current);
     setMediaNotice("");
 
-    const lectureContext = buildLectureContext({
-      durationMinutes: duration,
-      remainingMs: endsAt - Date.now(),
-      segment: 0,
-      hasDocument: documentMode,
-      boardEmpty: boardBlocksRef.current.length === 0,
-    });
-    const sent = submitTurn(firstText, "lecture", {
-      documentContext,
-      document: documentMeta,
-      image: seed.image,
-      lectureContext,
-      coverage: documentMode,
-    });
-    if (!sent) {
-      lectureActiveRef.current = false;
-      lectureEndsAtRef.current = null;
-      setLectureActive(false);
-      setLectureEndsAt(null);
-      return "failed";
-    }
-    showLectureNotice("المحاضرة بدات — غادي تكمّل بوحدها حتى يسالي الوقت، بلا ما تكليكي على «كمّل».");
+    // The lecture runs on a rebuilt live session whose SYSTEM instruction is the
+    // lecture protocol (never ask, never wait, auto-erase). Stash the seed turn;
+    // the handoff effect sends it as soon as the lecture session is connected.
+    lectureSeedRef.current = {
+      text: firstText,
+      options: {
+        documentContext,
+        document: documentMeta,
+        image: seed.image,
+        coverage: documentMode,
+      },
+    };
+    if (mediaNoticeTimerRef.current !== null) window.clearTimeout(mediaNoticeTimerRef.current);
+    setMediaNotice("");
+    showLectureNotice("كنجهزو المحاضرة…");
+    void connect(apiKey);
     return "started";
   };
 
   const stopLecture = useCallback((silence = true) => {
     const wasActive = lectureActiveRef.current;
+    const seedPending = lectureSeedRef.current !== null;
     lectureActiveRef.current = false;
     lectureEndsAtRef.current = null;
+    lectureSeedRef.current = null;
+    // The session still runs (or is being built with) the lecture system
+    // instruction: the next learner turn rebuilds it into normal tutoring (see
+    // submitTurn's handoff).
+    if (wasActive || seedPending) sessionNeedsNormalRebuildRef.current = true;
     if (lectureAutoTimerRef.current != null) {
       window.clearTimeout(lectureAutoTimerRef.current);
       lectureAutoTimerRef.current = null;
@@ -2593,6 +2637,8 @@ export default function App() {
   // every function recreated during render (submitTurn is a plain function).
   lectureContinueRef.current = () => {
     if (!lectureActiveRef.current || !sessionRef.current) return;
+    // The first segment has not gone out yet: the handoff effect owns it.
+    if (lectureSeedRef.current) return;
     const endsAt = lectureEndsAtRef.current;
     if (!endsAt) return;
     const remainingMs = endsAt - Date.now();
@@ -2655,6 +2701,7 @@ export default function App() {
   // turn-finished trigger and the state-effect trigger can never double-send.
   lectureScheduleRef.current = (delay = 450) => {
     if (!lectureActiveRef.current) return;
+    if (lectureSeedRef.current) return;
     if (lectureAutoTimerRef.current != null) window.clearTimeout(lectureAutoTimerRef.current);
     lectureAutoTimerRef.current = window.setTimeout(() => {
       lectureAutoTimerRef.current = null;
@@ -2737,7 +2784,12 @@ export default function App() {
       if (connectionStatus !== "connected" || !sessionRef.current) return;
       if (boardErasingRef.current) return;
       if (pendingAssistantIdRef.current) {
-        if (Date.now() - lastServerActivityRef.current > 7000) {
+        const idleMs = Date.now() - lastServerActivityRef.current;
+        // A turn that never produced a single frame gets a long grace window
+        // (heavy PDF/image contexts are slow to start); a turn that went silent
+        // mid-generation is cut sooner.
+        const stallLimit = turnSawServerActivityRef.current ? 8000 : 20000;
+        if (idleMs > stallLimit) {
           finishPendingAssistant(true);
         }
         return;
@@ -2746,6 +2798,44 @@ export default function App() {
     }, 1500);
     return () => window.clearInterval(timer);
   }, [connectionStatus, finishPendingAssistant, lectureActive]);
+
+  // SESSION HANDOFF: the system instruction is chosen when the live session is
+  // built (lecture protocol vs guided-mastery tutoring). Whenever a session comes
+  // up, this effect sends whatever turn was waiting for it: the lecture seed, or
+  // the learner's first post-lecture turn.
+  useEffect(() => {
+    if (connectionStatus !== "connected" || !sessionRef.current) return;
+    if (lectureActiveRef.current && lectureSeedRef.current) {
+      const seed = lectureSeedRef.current;
+      lectureSeedRef.current = null;
+      const endsAt = lectureEndsAtRef.current ?? Date.now();
+      const lectureContext = buildLectureContext({
+        durationMinutes: Math.max(1, lectureTotalMinutesRef.current),
+        remainingMs: Math.max(0, endsAt - Date.now()),
+        segment: 0,
+        hasDocument: lectureDocumentModeRef.current,
+        boardEmpty: boardBlocksRef.current.length === 0,
+      });
+      const sent = submitTurn(seed.text, "lecture", { ...seed.options, lectureContext });
+      if (!sent) {
+        showLectureNotice("ما قدرناش نبدا المحاضرة. عاود جرّب ولا بدا محاضرة جديدة.");
+        return;
+      }
+      showLectureNotice("المحاضرة بدات — غادي تكمّل بوحدها حتى يسالي الوقت، بلا ما تكليكي على «كمّل».");
+      return;
+    }
+    if (pendingNormalTurn && !lectureActiveRef.current) {
+      if (pendingNormalTakenRef.current) return;
+      pendingNormalTakenRef.current = true;
+      const turn = pendingNormalTurn;
+      setPendingNormalTurn(null);
+      submitTurn(turn.text, turn.action, turn.options);
+      return;
+    }
+    if (!lectureActiveRef.current && !sessionIsLectureRef.current) {
+      sessionNeedsNormalRebuildRef.current = false;
+    }
+  }, [connectionStatus, lectureActive, pendingNormalTurn]);
 
   /**
    * The learner granted permission to erase the full board (the «امسح وكمّل»
