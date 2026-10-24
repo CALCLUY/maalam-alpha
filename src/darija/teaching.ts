@@ -617,7 +617,9 @@ ${hasDocument ? `PDF LECTURE:
 ` : ""}HARD RULES:
 1) No questions to the learner — not even "واش فهمتي؟" or "واش نكملو؟".
 2) No interactive quiz panel and no blue question block.
-3) Do not end with an offer to continue; the app sends the next segment.
+3) ${wrapNow
+  ? "THIS IS THE FINAL SEGMENT: land the story and close the lecture. The moment your closing words end the lecture is over — do not start new material, do not announce that more is coming, and do not offer to continue."
+  : "Do not end with an offer to continue; the app sends the next segment."}
 4) One continuous audio stretch per segment; do not produce a second speech burst after a board tool.
 5) Keep the lesson coherent: each new idea must connect explicitly to the previous one.
 [/VOX-LECTURE]`;
@@ -627,13 +629,18 @@ type HistoryMessage = {
   role: "user" | "assistant";
   content: string;
   status: string;
+  /** Automatic lecture-continuation prompts: model history only, never restored
+   *  as if the learner had typed them. */
+  hidden?: boolean;
 };
 
 export type ResumeTurn = { role: "user" | "model"; parts: { text: string }[] };
 
 // Bound restored text so reconnecting does not exhaust a Live session's context.
 export function buildResumeHistory(messages: readonly HistoryMessage[]) {
-  const eligible = messages.filter((message) => message.content.trim() && message.status === "complete");
+  const eligible = messages.filter(
+    (message) => message.content.trim() && message.status === "complete" && !message.hidden,
+  );
   const turns: ResumeTurn[] = [];
   let characters = 0;
   for (let index = eligible.length - 1; index >= 0; index -= 1) {
@@ -645,5 +652,17 @@ export function buildResumeHistory(messages: readonly HistoryMessage[]) {
     });
     characters += message.content.length;
   }
-  return { turns, truncated: turns.length < eligible.length };
+  // The live API expects a clean alternation. Long lecture stretches have no
+  // learner turns at all (their prompts are hidden), so consecutive tutor
+  // segments are merged into one model turn instead of being sent as-is.
+  const merged: ResumeTurn[] = [];
+  for (const turn of turns) {
+    const last = merged[merged.length - 1];
+    if (last && last.role === turn.role) {
+      last.parts[0].text = `${last.parts[0].text}\n${turn.parts[0].text}`;
+      continue;
+    }
+    merged.push(turn);
+  }
+  return { turns: merged, truncated: merged.length < eligible.length };
 }

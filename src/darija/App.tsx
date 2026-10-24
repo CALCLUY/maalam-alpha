@@ -225,6 +225,8 @@ type SubmitTurnOptions = {
 };
 
 const RESPONSE_WATCHDOG_MS = 25_000;
+/** A lecture may overrun its clock only by this much while a segment is playing. */
+const LECTURE_HARD_STOP_GRACE_MS = 15_000;
 
 /** Debug ring buffer of what the Live stream actually sends (mime type, cadence,
  *  underruns). Readable as window.__maalamAudioLog while the app runs. */
@@ -755,6 +757,8 @@ export default function App() {
   const lectureContinueRef = useRef<() => void>(() => undefined);
   const lectureReconnectAttemptsRef = useRef(0);
   const lectureSendFailuresRef = useRef(0);
+  /** Proactive rebuilds used because a segment produced not a single server frame. */
+  const lectureSilentReconnectsRef = useRef(0);
   /** First lecture turn waiting for the lecture-mode session to come up. */
   const lectureSeedRef = useRef<{ text: string; options: SubmitTurnOptions } | null>(null);
   /** True while the live session still carries the lecture system instruction. */
@@ -1179,7 +1183,10 @@ export default function App() {
         // A full zone is never silently trimmed: the board is flagged full so
         // the learner can approve an erase, and nothing on the board is touched.
         if (prepared.status === "ok") {
-          commitBoardBlocks(insertPreparedBlock(boardBlocksRef.current, prepared.block));
+          // Refresh the timestamp at COMMIT time: the block may have waited in the
+          // reveal queue for a long stretch, and the board treats blocks older than
+          // a few seconds as already-written (they would pop in with no animation).
+          commitBoardBlocks(insertPreparedBlock(boardBlocksRef.current, { ...prepared.block, createdAt: Date.now() }));
           lastRevealRef.current = { at: Date.now(), transcriptLen: pendingAssistantTextRef.current.length };
         } else if (prepared.status === "full") {
           zoneFullRef.current(prepared.zone);
@@ -1200,6 +1207,9 @@ export default function App() {
   const revealNextBlock = useCallback(() => {
     const next = pendingRevealsRef.current[0];
     if (!next) return false;
+    // Never write into a zone that is being wiped right now: the wipe's clear
+    // would remove the fresh block and the writing would vanish.
+    if (boardErasingRef.current) return false;
     // A physically-full zone never grows: drop the write and ask to erase instead
     // of letting a scrollbar appear.
     if (
@@ -1211,7 +1221,9 @@ export default function App() {
       return false;
     }
     pendingRevealsRef.current = pendingRevealsRef.current.slice(1);
-    commitBoardBlocks(insertPreparedBlock(boardBlocksRef.current, next.block));
+    // Refresh the timestamp at commit time so the block always plays its
+    // handwriting animation (see flushSpokenExamples).
+    commitBoardBlocks(insertPreparedBlock(boardBlocksRef.current, { ...next.block, createdAt: Date.now() }));
     lastRevealRef.current = { at: Date.now(), transcriptLen: pendingAssistantTextRef.current.length };
     return true;
   }, [commitBoardBlocks]);
@@ -1313,6 +1325,7 @@ export default function App() {
         if (!turnSawServerActivityRef.current) lectureEmptyTurnsRef.current += 1;
       } else {
         lectureEmptyTurnsRef.current = 0;
+        lectureSilentReconnectsRef.current = 0;
       }
     }
 
@@ -1359,6 +1372,13 @@ export default function App() {
       if (!content) return;
 
       if (content.interrupted) {
+        // During a lecture the app drives every segment, so a server-side cancel
+        // would only punch a silent hole in the middle of the lesson. (A real
+        // learner barge-in already cuts the turn before its new message is sent.)
+        if (lectureActiveRef.current) {
+          pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "interrupted" });
+          return;
+        }
         // A cancel that lands before ANY payload of the new learner turn is the
         // tail of the previous generation the learner just interrupted.
         if (freshTurnPendingRef.current) return;
@@ -2335,7 +2355,7 @@ export default function App() {
 
     let referenceBlock = "";
     let refCount = 0;
-    if (!options.image && useDodaRefs && sentenceIndexRef.current) {
+    if (!options.image && action !== "lecture" && useDodaRefs && sentenceIndexRef.current) {
       const hits = sentenceIndexRef.current.search(text, 5);
       if (hits.length) {
         referenceBlock = formatReferenceBlock(hits);
@@ -2563,6 +2583,7 @@ export default function App() {
     lectureSegmentsRef.current = 0;
     lectureDocumentModeRef.current = documentMode;
     lectureEmptyTurnsRef.current = 0;
+    lectureSilentReconnectsRef.current = 0;
     {
       const totalMs = Math.max(60_000, duration * 60_000);
       const wrapAt = Math.max(20_000, Math.min(150_000, totalMs * 0.25));
@@ -2608,6 +2629,7 @@ export default function App() {
     lectureActiveRef.current = false;
     lectureEndsAtRef.current = null;
     lectureSeedRef.current = null;
+    lectureSilentReconnectsRef.current = 0;
     // The session still runs (or is being built with) the lecture system
     // instruction: the next learner turn rebuilds it into normal tutoring (see
     // submitTurn's handoff).
@@ -2648,10 +2670,12 @@ export default function App() {
     // The previous segment was the instructed wrap-up: the lecture is over.
     if (lectureWrapSentRef.current) {
       stopLecture(false);
+      showLectureNotice("سالى الوقت — سالات المحاضرة.");
       return;
     }
     if (remainingMs <= floorMs) {
       stopLecture(false);
+      showLectureNotice("سالى الوقت — سالات المحاضرة.");
       return;
     }
     if (lectureEmptyTurnsRef.current >= 3) {
@@ -2728,12 +2752,20 @@ export default function App() {
   useEffect(() => {
     if (!lectureActive || !lectureEndsAt) return;
     if (lectureClock < lectureEndsAt) return;
-    // Let a segment that is still being spoken finish; the continuation logic
-    // stops the lecture cleanly the moment it ends. Only an idle lecture is
-    // stopped here directly.
-    if (pendingAssistantIdRef.current) return;
-    stopLecture(false);
-  }, [lectureActive, lectureEndsAt, lectureClock, stopLecture]);
+    if (!pendingAssistantIdRef.current) {
+      // Idle at the deadline: the lecture is over.
+      stopLecture(false);
+      showLectureNotice("سالى الوقت — سالات المحاضرة.");
+      return;
+    }
+    // A segment is still being spoken: let it finish (the continuation logic
+    // stops the lecture the moment it ends), but never past the hard cap — a
+    // model that ignores the closing instruction cannot keep the lecture running
+    // after its time is over.
+    if (lectureClock - lectureEndsAt < LECTURE_HARD_STOP_GRACE_MS) return;
+    stopLecture(true);
+    showLectureNotice("سالى الوقت — وقفنا المحاضرة.");
+  }, [lectureActive, lectureEndsAt, lectureClock, stopLecture, showLectureNotice]);
 
   // A lecture survives session hiccups on its own: the mode stays active while
   // the socket is down, the app reconnects automatically (resume history is
@@ -2788,16 +2820,29 @@ export default function App() {
         // A turn that never produced a single frame gets a long grace window
         // (heavy PDF/image contexts are slow to start); a turn that went silent
         // mid-generation is cut sooner.
-        const stallLimit = turnSawServerActivityRef.current ? 8000 : 20000;
+        const sawActivity = turnSawServerActivityRef.current;
+        const stallLimit = sawActivity ? 10_000 : 20_000;
         if (idleMs > stallLimit) {
           finishPendingAssistant(true);
+          // A whole segment with not ONE server frame means the socket is very
+          // likely dead even though it still reports "connected": rebuild it
+          // proactively instead of letting the lecture fall silent.
+          if (
+            !sawActivity &&
+            lectureActiveRef.current &&
+            apiKey.trim() &&
+            lectureSilentReconnectsRef.current < 2
+          ) {
+            lectureSilentReconnectsRef.current += 1;
+            void connect(apiKey);
+          }
         }
         return;
       }
       lectureScheduleRef.current(350);
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [connectionStatus, finishPendingAssistant, lectureActive]);
+  }, [apiKey, connect, connectionStatus, finishPendingAssistant, lectureActive]);
 
   // SESSION HANDOFF: the system instruction is chosen when the live session is
   // built (lecture protocol vs guided-mastery tutoring). Whenever a session comes
