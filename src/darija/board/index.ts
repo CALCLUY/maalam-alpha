@@ -21,7 +21,7 @@ export {
 export type { BoardWriteArgs, DuplicateCandidate, PreparedWrite } from "./state";
 export { buildFormalZoneFromAnalysis, buildPointHeading, buildEmptyRightZone } from "./seed";
 export { extractBoardBlocksFromTranscript } from "./autoSync";
-export { exampleMentionedInSpeech, isExampleWrite, isValidExampleArgs } from "./speechGate";
+export { blockMentionedInSpeech, exampleMentionedInSpeech, isExampleWrite, isValidExampleArgs } from "./speechGate";
 export {
   hasArabicScript,
   looksLikeEquation,

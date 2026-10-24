@@ -458,7 +458,10 @@ function useVisualLines(flat: FlatUnit[]) {
   const measureRef = useRef<HTMLDivElement | null>(null);
   const [lines, setLines] = useState<VisualLine[] | null>(null);
 
-  useEffect(() => {
+  // Layout effect, not effect: measuring after the first paint made every block
+  // paint its COMPLETE static text for a frame and then start again from an empty
+  // line — the "full writing flashes, then it writes itself" glitch.
+  useLayoutEffect(() => {
     const host = measureRef.current;
     if (!host) return;
     let cancelled = false;
@@ -521,16 +524,17 @@ function useVisualLines(flat: FlatUnit[]) {
 }
 
 function lineDurationSec(line: string, index: number, seed: number, rtl: boolean): number {
-  // Natural chalk is slower than a typewriter: Latin/French usually has more
-  // connected cursive strokes, while Arabic has longer joined strokes. Punctuation
-  // creates a small real-hand pause at the end of a line.
+  // Chalk still writes at a human pace, but a line must land WHILE the tutor is
+  // saying it, not seconds after they moved on: a line is written over roughly
+  // the time it takes to say it (a little faster, the way a teacher writes the
+  // key line then explains it). Punctuation keeps its small real-hand pause.
   const chars = line.replace(/\s+/g, "").length;
   const words = line.trim().split(/\s+/).filter(Boolean).length;
-  const base = chars * (rtl ? 0.078 : 0.066) + words * 0.018;
-  const punctuationPause = /[.!?؟؛:：]$/.test(line.trim()) ? 0.11 : /[,،]$/.test(line.trim()) ? 0.055 : 0;
+  const base = chars * (rtl ? 0.042 : 0.035) + words * 0.012;
+  const punctuationPause = /[.!?؟؛:：]$/.test(line.trim()) ? 0.09 : /[,،]$/.test(line.trim()) ? 0.05 : 0;
   const raw = Math.sin(seed * 127.1 + index * 311.7) * 43758.5453;
   const jitter = 0.9 + (raw - Math.floor(raw)) * 0.2; // stable ±10% human variance
-  return Math.min(3.1, Math.max(0.52, base * jitter + punctuationPause));
+  return Math.min(1.8, Math.max(0.42, base * jitter + punctuationPause));
 }
 
 /**
@@ -615,7 +619,11 @@ function ChalkText({
         )}
       </div>
       {lines === null ? (
-        <div className="chalk-static">
+        // Still measuring the line breaks: a block that is about to be written
+        // must show NOTHING (it is written line by line a moment later). Only a
+        // finished/static block shows its text right away. This is what stopped
+        // the complete text flashing before the handwriting animation.
+        <div className={`chalk-static${animate ? " is-pending" : ""}`}>
           {flat.map((unit, index) =>
             unit.kind === "br" ? <br key={index} /> : renderUnit(unit, index),
           )}
@@ -1059,13 +1067,21 @@ function useSequentialWriting(blocks: BoardBlock[]) {
     });
   }, [blocks]);
 
-  // Blocks seeded before this session (PDF roadmap, restored lesson) are already
-  // on the board: show them immediately instead of re-writing them.
+  // A block already on the board when this zone first rendered (a restored
+  // lesson, a PDF roadmap seeded before mount) is PRE-EXISTING: it is shown at
+  // once. Anything arriving later is a fresh write and always animates, so a
+  // block can never pop in fully formed (the old "older than 4 seconds" stamp
+  // could mark a fresh block mid-animation, flashing its finished text) and a
+  // long write is never cut short just because it has existed for a while.
+  const preexistingRef = useRef<Set<string> | null>(null);
+  if (preexistingRef.current === null) {
+    preexistingRef.current = new Set(blocks.map((block) => block.id));
+  }
   useEffect(() => {
-    const alreadyThere = blocks.filter((block) => Date.now() - block.createdAt > 4000).map((block) => block.id);
-    if (!alreadyThere.length) return;
+    const ids = Array.from(preexistingRef.current ?? []).filter((id) => blocks.some((block) => block.id === id));
+    if (!ids.length) return;
     setWrittenIds((previous) => {
-      const missing = alreadyThere.filter((id) => !previous.includes(id));
+      const missing = ids.filter((id) => !previous.includes(id));
       return missing.length ? [...previous, ...missing] : previous;
     });
   }, [blocks]);

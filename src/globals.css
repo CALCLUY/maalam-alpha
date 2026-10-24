@@ -2219,6 +2219,13 @@ input[type="radio"]:focus-visible {
   white-space: pre-wrap;
 }
 
+/* A block awaiting its line measurement while it is about to be WRITTEN: keep
+   the geometry but show nothing, so the handwriting animation is the first
+   thing seen (no flash of finished text before it starts writing). */
+.chalk-static.is-pending {
+  visibility: hidden;
+}
+
 .chalk-hand-line.is-static {
   animation: none;
   clip-path: none;

@@ -86,6 +86,7 @@ import {
   applyBoardWrite,
   BOARD_FUNCTION_DECLARATIONS,
   Blackboard,
+  blockMentionedInSpeech,
   buildFormalZoneFromAnalysis,
   buildPointHeading,
   countActiveArrows,
@@ -152,11 +153,14 @@ const EXAMPLE_GRACE_MS = 45_000;
 type PendingReveal = { block: BoardBlock; queuedAt: number };
 /**
  * Pacing for speech-synced reveals: minimum gap between reveals (lets the
- * handwriting animation finish and the student read), speech needed to unlock
- * the next reveal, and max wait while responding (covers audio outrunning text).
+ * handwriting animation finish and the student read), new transcript characters
+ * that must have been spoken before a line that could not be matched word-for-word
+ * lands (formulas, diagrams), and the hard cap a queued line is held while the
+ * turn runs (covers audio outrunning transcription).
  */
 const REVEAL_MIN_INTERVAL_MS = 1_100;
-const REVEAL_MAX_WAIT_MS = 3_600;
+const REVEAL_FALLBACK_TEXT = 110;
+const REVEAL_MAX_WAIT_MS = 12_000;
 /**
  * Speech pacing for board writes: the tutor may stack a few lines while
  * starting an idea, but past that it MUST speak between writes — otherwise the
@@ -759,6 +763,8 @@ export default function App() {
   const lectureSendFailuresRef = useRef(0);
   /** Proactive rebuilds used because a segment produced not a single server frame. */
   const lectureSilentReconnectsRef = useRef(0);
+  /** The next connect() rebuilds a clean session without replaying restored history. */
+  const skipResumeHistoryRef = useRef(false);
   /** First lecture turn waiting for the lecture-mode session to come up. */
   const lectureSeedRef = useRef<{ text: string; options: SubmitTurnOptions } | null>(null);
   /** True while the live session still carries the lecture system instruction. */
@@ -1229,20 +1235,38 @@ export default function App() {
   }, [commitBoardBlocks]);
 
   const maybeRevealQueuedBlocks = useCallback(() => {
-    if (!pendingRevealsRef.current.length) return;
+    const head = pendingRevealsRef.current[0];
+    if (!head) return;
     if (!pendingAssistantIdRef.current) return;
+    const now = Date.now();
     // Minimum gap between reveals lets the handwriting animation play.
-    if (Date.now() - lastRevealRef.current.at < REVEAL_MIN_INTERVAL_MS) return;
-    // Voice-synced pacing: release blocks based on how far the spoken audio has
-    // progressed since the last reveal. The total scheduled audio duration tells
-    // us how long the turn will be; activeSources tells us how much has played.
-    const speechMs = Date.now() - speechStartRef.current;
-    const audioProgress = speechStartRef.current > 0 ? Math.min(1, speechMs / Math.max(2000, scheduledDurationRef.current * 1000)) : 0;
-    const revealFloor = Math.floor(audioProgress * (pendingRevealsRef.current.length + 1));
-    const alreadyRevealed = pendingRevealsRef.current.length;
-    const shouldReveal = alreadyRevealed > revealFloor || Date.now() - lastRevealRef.current.at >= REVEAL_MAX_WAIT_MS;
-    if (shouldReveal) revealNextBlock();
-  }, [revealNextBlock]);
+    if (now - lastRevealRef.current.at < REVEAL_MIN_INTERVAL_MS) return;
+
+    // 1. SPEECH SYNC: the line whose own words are being said right now is
+    //    written right now. The board can never run ahead of the voice here,
+    //    and the line lands while it is being spoken instead of seconds before
+    //    or after — which is what made writing feel out of sync with speech.
+    if (blockMentionedInSpeech(head.block, recentTranscript())) {
+      revealNextBlock();
+      return;
+    }
+
+    // 2. FALLBACK for lines that cannot be matched word-for-word (formulas,
+    //    diagrams, condensed notes): the voice must have clearly moved on — a
+    //    real stretch of new speech — before such a line lands.
+    const spokenSinceReveal = pendingAssistantTextRef.current.length - lastRevealRef.current.transcriptLen;
+    if (spokenSinceReveal >= REVEAL_FALLBACK_TEXT) {
+      revealNextBlock();
+      return;
+    }
+
+    // 3. Never freeze: if speech produced nothing new to key on (no transcript,
+    //    tutor pausing, turn ended silently) the head still lands, spaced out so
+    //    the queue is never dumped on the board all at once.
+    if (now - head.queuedAt >= REVEAL_MAX_WAIT_MS && now - lastRevealRef.current.at >= REVEAL_MAX_WAIT_MS) {
+      revealNextBlock();
+    }
+  }, [revealNextBlock, recentTranscript]);
 
   const flushRevealQueue = useCallback(() => {
     // Turn is over: drain leftovers at the same paced rhythm instead of dumping
@@ -1269,13 +1293,15 @@ export default function App() {
     pendingRevealsRef.current = [...queue, { block, queuedAt: Date.now() }];
   }, []);
 
-  // Fallback pacing: if speech continues without transcript growth (audio
-  // outrunning transcription), still release queued blocks every few seconds.
+  // Fallback ticker for the reveal gate: the gate is re-evaluated whenever the
+  // transcript grows, and this timer keeps the time-based fallbacks moving even
+  // when transcription is quiet. Same tick as the reveal floor so a line can be
+  // written the moment the voice has moved on.
   useEffect(() => {
     if (!isResponding) return;
     const timer = window.setInterval(() => {
       maybeRevealQueuedBlocks();
-    }, 2000);
+    }, 1200);
     return () => window.clearInterval(timer);
   }, [isResponding, maybeRevealQueuedBlocks]);
 
@@ -2117,7 +2143,12 @@ export default function App() {
       const oldSession = sessionRef.current;
       sessionRef.current = null;
       oldSession?.close();
-      const history = buildResumeHistory(messagesRef.current);
+      // A lecture that keeps coming back empty may be choking on the restored
+      // history: the caller can ask for a clean, smaller session instead.
+      const history = skipResumeHistoryRef.current
+        ? { turns: [], truncated: false }
+        : buildResumeHistory(messagesRef.current);
+      skipResumeHistoryRef.current = false;
       let connectionClosed = false;
 
       try {
@@ -2179,7 +2210,12 @@ export default function App() {
             onerror: (event) => {
               if (connectionId !== connectionIdRef.current) return;
               connectionClosed = true;
-              setError(event.message || "وقع مشكل فالاتصال بـ maalam Live.");
+              // A lecture heals itself: the reconnect effect rebuilds the session
+              // and the heartbeat re-arms the next segment. A raw transport
+              // banner mid-lesson only alarms the learner, so it is suppressed.
+              if (!lectureActiveRef.current) {
+                setError(event.message || "وقع مشكل فالاتصال بـ maalam Live.");
+              }
               setConnectionStatus("disconnected");
               stopAudio();
               finishPendingAssistant(true);
@@ -2190,7 +2226,7 @@ export default function App() {
               sessionRef.current = null;
               setConnectionStatus("disconnected");
               finishPendingAssistant(true);
-              if (event.code !== 1000) {
+              if (event.code !== 1000 && !lectureActiveRef.current) {
                 setError(event.reason || "الجلسة تقطعات. عاود الاتصال باش تكمّل.");
               }
             },
@@ -2679,6 +2715,15 @@ export default function App() {
       return;
     }
     if (lectureEmptyTurnsRef.current >= 3) {
+      // A run of empty turns must never kill a lecture: rebuild the session
+      // (dropping the restored history once it has already been retried) and
+      // keep teaching. Only the clock ends a lecture.
+      lectureEmptyTurnsRef.current = 0;
+      if (apiKey.trim()) {
+        if (lectureSilentReconnectsRef.current >= 2) skipResumeHistoryRef.current = true;
+        void connect(apiKey);
+        return;
+      }
       stopLecture(false);
       showLectureNotice("وقّفنا المحاضرة حيت maalam ما جاوبش. عاود جرّب ولا بدا محاضرة جديدة.");
       return;
@@ -2710,11 +2755,18 @@ export default function App() {
     }
     // A failed send is almost always a transport hiccup (goAway, reconnect in
     // flight). Keep the lecture armed: the reconnect effect and the heartbeat
-    // resume it as soon as the session is back. Only a persistent failure while
-    // connected ends the lecture.
+    // resume it as soon as the session is back. Even a persistent failure while
+    // "connected" rebuilds the session instead of ending the lecture — only the
+    // clock ends a lecture.
     lectureSendFailuresRef.current += 1;
     if (connectionStatus === "disconnected") return;
     if (lectureSendFailuresRef.current >= 12) {
+      lectureSendFailuresRef.current = 0;
+      if (apiKey.trim()) {
+        skipResumeHistoryRef.current = true;
+        void connect(apiKey);
+        return;
+      }
       stopLecture(false);
       showLectureNotice("ما قدرناش نكملو المحاضرة. عاود جرّب ولا بدا محاضرة جديدة.");
     }
@@ -2770,7 +2822,8 @@ export default function App() {
   // A lecture survives session hiccups on its own: the mode stays active while
   // the socket is down, the app reconnects automatically (resume history is
   // re-attached by connect()), and the lecture heartbeat picks the next segment
-  // back up. Only after three failed reconnect attempts does it give up.
+  // back up. Reconnect attempts are unbounded and spaced out: a transport
+  // hiccup never ends a lecture — its clock does.
   useEffect(() => {
     if (!lectureActive) {
       lectureReconnectAttemptsRef.current = 0;
@@ -2781,18 +2834,17 @@ export default function App() {
       return;
     }
     if (connectionStatus !== "disconnected" || !apiKey.trim()) return;
-    if (lectureReconnectAttemptsRef.current >= 3) {
-      stopLecture(false);
-      showLectureNotice("تقطع الاتصال وما قدرناش نرجعو المحاضرة. عاود الاتصال وبدا محاضرة جديدة.");
-      return;
-    }
     lectureReconnectAttemptsRef.current += 1;
-    showLectureNotice("تقطع الاتصال… كنعاودو نرجعو المحاضرة بوحدنا.");
+    const attempt = lectureReconnectAttemptsRef.current;
+    // Keep the learner informed without a nagging banner every few seconds.
+    if (attempt === 1 || attempt % 5 === 0) {
+      showLectureNotice("تقطع الاتصال… كنعاودو نرجعو المحاضرة بوحدنا.");
+    }
     const timer = window.setTimeout(() => {
       if (lectureActiveRef.current) void connect(apiKey);
-    }, 1200);
+    }, Math.min(7000, 1000 + attempt * 800));
     return () => window.clearTimeout(timer);
-  }, [apiKey, connectionStatus, connect, lectureActive, showLectureNotice, stopLecture]);
+  }, [apiKey, connectionStatus, connect, lectureActive, showLectureNotice]);
 
   // The next segment starts as soon as the model's turn ends. It deliberately
   // does NOT wait for the speaker to finish: submitTurn(preservePlayback) appends
@@ -2815,25 +2867,36 @@ export default function App() {
     const timer = window.setInterval(() => {
       if (connectionStatus !== "connected" || !sessionRef.current) return;
       if (boardErasingRef.current) return;
+      // Insurance against a suspended AudioContext (device sleep, tab throttled):
+      // a lecture turn waiting on audio must never be silent for that reason.
+      const audioContext = audioContextRef.current;
+      if (audioContext && audioContext.state === "suspended" && pendingAssistantIdRef.current) {
+        pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "watchdog", state: audioContext.state });
+        void audioContext.resume();
+      }
       if (pendingAssistantIdRef.current) {
         const idleMs = Date.now() - lastServerActivityRef.current;
-        // A turn that never produced a single frame gets a long grace window
-        // (heavy PDF/image contexts are slow to start); a turn that went silent
-        // mid-generation is cut sooner.
+        // A turn that never produced a single frame gets a grace window (heavy
+        // PDF/image contexts are slow to start, but a silent lecture teaches
+        // nothing, so it is tighter than the normal-mode window); a turn that
+        // went silent mid-generation is cut sooner.
         const sawActivity = turnSawServerActivityRef.current;
-        const stallLimit = sawActivity ? 10_000 : 20_000;
+        const stallLimit = sawActivity ? 10_000 : 15_000;
         if (idleMs > stallLimit) {
           finishPendingAssistant(true);
           // A whole segment with not ONE server frame means the socket is very
           // likely dead even though it still reports "connected": rebuild it
-          // proactively instead of letting the lecture fall silent.
+          // proactively instead of letting the lecture fall silent. The first
+          // rebuilds keep the restored history; later ones drop it entirely in
+          // case the context itself is what the server chokes on.
           if (
             !sawActivity &&
             lectureActiveRef.current &&
             apiKey.trim() &&
-            lectureSilentReconnectsRef.current < 2
+            lectureSilentReconnectsRef.current < 4
           ) {
             lectureSilentReconnectsRef.current += 1;
+            if (lectureSilentReconnectsRef.current >= 2) skipResumeHistoryRef.current = true;
             void connect(apiKey);
           }
         }
