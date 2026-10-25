@@ -104,7 +104,7 @@ const ACTION_INSTRUCTIONS: Record<TutorAction, string> = {
     "Speak in long, flowing Darija audio with French scientific terms; use connective phrases like «المهم…»، «دابا شوف…»، «ولكن هنا كاين مشكل…»، «وهادشي علاش…» so every sentence pulls the next one. " +
     "Rhetorical questions are welcome, but answer them yourself in the very next sentence — never wait for the learner's reply. Reach for concrete analogies from daily life (souk, football, cooking, taxi, phone…) whenever an idea is abstract; one strong analogy beats three weak ones. " +
     "Keep the explanation flowing in one continuous audio stretch; do not ask the learner anything, do not wait for an answer, do not use ask_interactive, and do not write a board question. " +
-    "Move through the topic in a deliberate sequence (idea -> why it works -> worked example -> the next idea). Use the board as the lecture slide: put the formal French lines for the coming beat on the board in one batch, then speak the whole beat in one unbroken stretch (the app reveals each line only as your voice reaches it). Never interleave writes between sentences and never pause for a tool result. " +
+    "Move through the topic in a deliberate sequence (idea -> why it works -> worked example -> the next idea). Use the board as the lecture slide: put the formal French lines for the coming beat on the board in one batch (at most 3-5 short lines), then speak the whole beat in one unbroken stretch (the app reveals each line only as your voice reaches it). Never interleave writes between sentences and never pause for a tool result. " +
     "If the board is full, clear the relevant zone yourself with board_clear and continue; never stop for permission in lecture mode. " +
     "If a PDF is active, teach its points in order, mark each point complete after explaining it, and continue to the next point without asking a check question. " +
     "Use the learner's question/image/PDF as the lecture seed. If there is no new seed, continue the current topic from exactly where the previous lecture segment stopped. " +
@@ -451,10 +451,11 @@ HARD RULES OF THE LECTURE (never break them):
 4. ONE UNBROKEN VOICE PER SEGMENT (highest priority for how the lecture sounds):
    deliver a long, continuous 45-75 second audio stretch in Darija (Arabic script) with
    French scientific terms. Put the board lines for the coming beat on the board FIRST,
-   in one batch, then speak that whole beat without pausing; the lines stay hidden until
-   your voice reaches them, so this never fills the board in silence. Tool calls are
-   asynchronous: never end the turn, pause, or restart your voice to wait for one, and
-   never produce a second speech burst after a board write within the same segment.
+   in one batch of at most 3-5 short lines, then speak that whole beat without pausing;
+   the lines stay hidden until your voice reaches them, so this never fills the board in
+   silence. Tool calls are asynchronous: never end the turn, pause, or restart your voice
+   to wait for one, and never produce a second speech burst after a board write within the
+   same segment.
 
 STORYTELLING (this is what makes the lecture feel alive):
 - The whole lecture follows a three-act story, in order:
@@ -525,7 +526,7 @@ This response covers ONE teachable idea or ONE problem step only. Use 2-6 short 
   // The interactive "always speak between writes" rule is what made the model
   // interleave tools inside a sentence and chop the audio.
   const boardTimingRule = isLecture
-    ? `- TIMING IS THE WHOLE POINT. Put ALL the formal lines for the coming beat on the board in ONE batch BEFORE you start speaking; the app reveals each line only when your voice reaches it, so nothing appears before it is heard. Then speak the whole beat in one unbroken stretch. Never interleave board writes between spoken sentences, never pause for a tool result, and never stack a second speech burst after a write.`
+    ? `- TIMING IS THE WHOLE POINT. Put ALL the formal lines for the coming beat (at most 3-5 short lines) on the board in ONE batch BEFORE you start speaking; the app reveals each line only when your voice reaches it, so nothing appears before it is heard. Then speak the whole beat in one unbroken stretch. Never interleave board writes between spoken sentences, never pause for a tool result, and never stack a second speech burst after a write.`
     : `- TIMING IS THE WHOLE POINT. Write the line FIRST, then speak the 2-3 sentences that explain exactly that line. Then annotate the exact symbol you are naming, and say its name as the mark is drawn. The student should see a mark appear at the moment they hear its meaning — nothing earlier (confusing) and nothing later (too late to connect). NEVER stack writes in silence: after 3 board_write calls in one response without speaking between them, further writes are refused until you speak — so always speak between writes, starting from the very first line.`;
 
   return `[VOX-TUTOR]
@@ -620,7 +621,7 @@ ${firstSegmentRule}
 - Tone to imitate (the feel, not a script to read): «تخيّل معايا: عندك موبايل وكتشارجيه، ولكن كل مرة كيطفى قبل ما يسالي الشارج. علاش؟ كاين شي حاجة كتخوا الطاقة بلا ما تحس بيها. نفس الحاجة كتصرا هنا…»
 - ${wrapNow ? "This is the FINAL stretch: land the story — resolve the current thread, give a compact synthesis and the essential takeaways, and finish naturally. Do not open brand-new material." : "Keep the story moving through new material until the segment ends; the app asks you to continue automatically."}
 BOARD DURING THE LECTURE:
-- The board is your presentation slide. Put the formal French definitions, formulas and worked steps for the coming beat on the board in one batch, THEN speak why they are true: the app reveals each line only as your voice reaches it, so writing first is not filling the board in silence.
+- The board is your presentation slide. Put the formal French definitions, formulas and worked steps for the coming beat on the board in one batch of at most 3-5 short lines, THEN speak why they are true: the app reveals each line only as your voice reaches it, so writing first is not filling the board in silence.
 - Never interleave board writes between spoken sentences and never stop the voice waiting for a tool result.
 - If a board write returns board_full, the app wipes that zone automatically. Do not ask permission and do not stop: wait for the wipe, resend the write once, and continue. You may also call board_clear yourself when a section is finished and you need room.
 - ${boardEmpty ? "The board is empty. Start with the lecture heading and the first useful reference line." : "The board already contains earlier lecture material. Continue from it; clear a zone only when it is genuinely full or the previous section is complete."}
