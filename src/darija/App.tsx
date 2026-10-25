@@ -2066,13 +2066,13 @@ export default function App() {
     setIsResponding(false);
     setResumePending(willResume);
     if (lectureActiveRef.current) {
-      // A turn that produced NO speech and NO audio is a failed continuation,
-      // even if the socket sent an empty turnComplete or a lone tool call: the
-      // learner sat in silence through the whole segment. Three of those in a
-      // row rebuild the session instead of letting the lecture run mute for
-      // minutes. Only manual stop/disconnect clear lectureActiveRef before
-      // finishing, so a real end never reaches this counter.
-      if (!text && !audioChunks.length) {
+      // A lecture segment that produced NO AUDIO is a failed continuation even
+      // if it wrote text or a board line: the learner sat in silence through the
+      // whole segment. Three of those in a row rebuild the session instead of
+      // letting the lecture run mute for minutes. Only manual stop/disconnect
+      // clear lectureActiveRef before finishing, so a real end never reaches
+      // this counter.
+      if (!audioChunks.length) {
         lectureEmptyTurnsRef.current += 1;
       } else {
         lectureEmptyTurnsRef.current = 0;
