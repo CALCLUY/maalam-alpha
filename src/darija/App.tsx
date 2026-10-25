@@ -164,9 +164,25 @@ type PendingReveal = { block: BoardBlock; queuedAt: number; heardAt: number };
  * but visibly out of sync with the voice.
  */
 const REVEAL_MIN_INTERVAL_MS = 750;
-const REVEAL_FALLBACK_TEXT = 24;
+const REVEAL_FALLBACK_TEXT = 48;
 const REVEAL_MATCH_OVERLAP = 40;
-const REVEAL_MAX_WAIT_MS = 4_500;
+const REVEAL_MAX_WAIT_MS = 9_000;
+/**
+ * Conservative speaking rate used to place transcript text on the playback
+ * timeline. Output transcription frequently arrives a burst ahead of the audio
+ * packets that contain those words; attaching it to whatever audio had already
+ * been posted made the board think a whole line had been heard as soon as its
+ * first packet played — the "reads a word before it reaches it" symptom.
+ * Giving each character its own speaking time keeps the reveal behind the voice
+ * even when the transcript runs ahead. Slightly slow on purpose.
+ */
+const SPEECH_CHARS_PER_SECOND = 12;
+/**
+ * Extra distance the reveal stays behind the estimated voice position. The rate
+ * above is only an estimate; this absorbs pauses and the few words the model
+ * may compress, so the chalk still lands after the words, never before.
+ */
+const SPEECH_REVEAL_LAG_SECONDS = 0.5;
 /**
  * Speech pacing for board writes: the tutor may stack a few lines while
  * starting an idea, but past that it MUST speak between writes — otherwise the
@@ -253,7 +269,10 @@ type SubmitTurnOptions = {
   resume?: boolean;
 };
 
-const RESPONSE_WATCHDOG_MS = 25_000;
+const RESPONSE_WATCHDOG_MS = 15_000;
+/** Once a turn has spoken, a stalled generation is cut sooner: the learner is
+ *  already sitting in silence and the jitter buffer drains in under two seconds. */
+const RESPONSE_STALL_AFTER_AUDIO_MS = 9_000;
 /** A server-side cancel arriving this soon after our own send is the tail of the
  *  answer the app itself just cut — it must never kill the new answer. */
 const INTERRUPT_TAIL_WINDOW_MS = 6_000;
@@ -557,13 +576,6 @@ class MaalamPcmPlayer extends AudioWorkletProcessor {
 
 registerProcessor("maalam-pcm-player", MaalamPcmPlayer);
 `;
-
-type AudioTimelineEntry = {
-  /** Cumulative audio-stream position (seconds) after this packet was queued. */
-  audioEnd: number;
-  /** Transcript characters that correspond to that audio position. */
-  chars: number;
-};
 
 type PlayerStatusMessage =
   | {
@@ -1287,10 +1299,9 @@ export default function App() {
   const postedAudioRef = useRef(0);
   /** Audio-stream position at which the current turn's transcript begins. */
   const turnAudioStartRef = useRef(0);
-  /** Audio position → transcript length, so text never runs ahead of the voice. */
-  const audioTimelineRef = useRef<AudioTimelineEntry[]>([{ audioEnd: 0, chars: 0 }]);
-  /** Transcript length reached by the last posted audio packet. */
-  const lastAudioCharsRef = useRef(0);
+  /** Transcript length already spoken when that audio position began. A
+   *  continuation splices new speech after the previous answer's tail. */
+  const turnTranscriptBaseRef = useRef(0);
   /** Context time at which the legacy fallback stream started. */
   const legacyStreamStartRef = useRef(0);
 
@@ -1573,8 +1584,7 @@ export default function App() {
     resampleStateRef.current = { sourceRate: 0, last: 0, phase: 0, primed: false };
     postedAudioRef.current = 0;
     turnAudioStartRef.current = 0;
-    audioTimelineRef.current = [{ audioEnd: 0, chars: 0 }];
-    lastAudioCharsRef.current = 0;
+    turnTranscriptBaseRef.current = 0;
     workletPlayedRef.current = 0;
     workletQueuedRef.current = 0;
     workletUnderrunsRef.current = 0;
@@ -1649,17 +1659,13 @@ export default function App() {
           pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "format", mime: mimeType });
         }
 
-        // The audio stream and the transcript are generated at the same pace,
-        // but transcription arrives on the main thread before the learner hears
-        // the matching audio (the worklet can be ~1 s ahead). Record where each
-        // packet ends in the stream so the board can reveal a line only once the
-        // voice has actually reached it.
+        // The board must never attribute freshly transcribed text to a packet
+        // that was posted before those words were spoken: output transcription
+        // arrives in bursts ahead of its audio. Only the played audio position
+        // is trustworthy, so the reveal maps it back to characters at a slow
+        // speaking rate (see transcriptCharsAtAudio).
         postedAudioRef.current += duration;
         scheduledDurationRef.current += duration;
-        lastAudioCharsRef.current = pendingAssistantTextRef.current.length;
-        const timeline = audioTimelineRef.current;
-        timeline.push({ audioEnd: postedAudioRef.current, chars: lastAudioCharsRef.current });
-        if (timeline.length > 900) timeline.splice(0, timeline.length - 900);
         if (speechStartRef.current === 0) speechStartRef.current = Date.now();
 
         const mode = workletModeRef.current;
@@ -1754,29 +1760,38 @@ export default function App() {
     return 0;
   }, []);
 
+  /**
+   * Transcript characters that belong at an audio-stream position, estimated
+   * from a deliberately slow speaking rate. Transcript text cannot be trusted
+   * for this: Live sends a whole burst of it before the audio that contains it,
+   * so attaching it to the latest packet was exactly the "the board reads the
+   * word before you hear it" bug. Under-counting only makes the chalk lag a
+   * little; over-counting reads ahead, which is the visible failure.
+   */
+  const transcriptCharsAtAudio = useCallback((audioSeconds: number) => {
+    const elapsed = Math.max(
+      0,
+      audioSeconds - turnAudioStartRef.current - SPEECH_REVEAL_LAG_SECONDS,
+    );
+    return turnTranscriptBaseRef.current + Math.floor(elapsed * SPEECH_CHARS_PER_SECOND);
+  }, []);
+
+  /** Transcript length the board is allowed to see. While a turn is running,
+   *  only that turn's text counts: falling back to the previous answer's text
+   *  let a new board line match words spoken minutes earlier and appear before
+   *  the tutor reached it. */
+  const visibleTranscriptLength = useCallback(
+    () => (pendingAssistantIdRef.current
+      ? pendingAssistantTextRef.current.length
+      : (pendingAssistantTextRef.current || lastTranscriptRef.current).length),
+    [],
+  );
+
   /** Transcript length that has actually reached the learner's ears. */
-  const audibleCharCount = useCallback(() => {
-    const timeline = audioTimelineRef.current;
-    if (!timeline.length) return 0;
-    const start = turnAudioStartRef.current;
-    const heard = Math.max(start, audioPlayedSeconds());
-    let previous = timeline[0];
-    if (heard <= previous.audioEnd) return previous.chars;
-    for (let index = 1; index < timeline.length; index += 1) {
-      const entry = timeline[index];
-      if (entry.audioEnd <= previous.audioEnd) {
-        previous = entry;
-        continue;
-      }
-      if (heard <= entry.audioEnd) {
-        const span = entry.audioEnd - previous.audioEnd;
-        const fraction = Math.min(1, Math.max(0, (heard - previous.audioEnd) / span));
-        return Math.round(previous.chars + (entry.chars - previous.chars) * fraction);
-      }
-      previous = entry;
-    }
-    return previous.chars;
-  }, [audioPlayedSeconds]);
+  const audibleCharCount = useCallback(
+    () => Math.min(visibleTranscriptLength(), transcriptCharsAtAudio(audioPlayedSeconds())),
+    [audioPlayedSeconds, transcriptCharsAtAudio, visibleTranscriptLength],
+  );
 
   /** The transcript currently being spoken, or the last one if the turn already
    *  finished — always cut at the point the voice has actually reached. The
@@ -1784,7 +1799,9 @@ export default function App() {
    *  raw is what made board lines appear before the tutor read them. */
   const recentTranscript = useCallback(() => {
     const pending = pendingAssistantTextRef.current;
-    const source = pending || lastTranscriptRef.current;
+    const source = pendingAssistantIdRef.current
+      ? pending
+      : pending || lastTranscriptRef.current;
     const heard = audibleCharCount();
     return source.slice(0, Math.min(source.length, Math.max(0, heard)));
   }, [audibleCharCount]);
@@ -1968,11 +1985,11 @@ export default function App() {
 
     // Transcription runs ahead of the voice (the jitter buffer is deliberately
     // large). Resuming from the RAW transcript tail therefore skips words whose
-    // audio was never heard — the "it reads a word before it reaches it" cut.
-    // Anchor the continuation to the last packet that was actually posted for
-    // playback; everything up to there will have been heard when the buffered
-    // tail finishes.
-    const heardChars = Math.min(rawText.length, Math.max(0, lastAudioCharsRef.current));
+    // audio was never heard — the "it cuts the answer" bug. Anchor the
+    // continuation at the position the learner has actually reached; the
+    // conservative mapping can only under-count, which repeats the last few
+    // buffered words instead of dropping the rest of the sentence.
+    const heardChars = Math.min(rawText.length, Math.max(0, audibleCharCount()));
     const heardText = rawText.slice(0, heardChars).trim();
 
     // An INVOLUNTARY cut (watchdog, socket, server cancel) is continued
@@ -2090,7 +2107,7 @@ export default function App() {
     // tail keeps playing, and an extra half-second here only increased the gap
     // the worklet had to bridge at every segment boundary.
     if (lectureActiveRef.current) lectureScheduleRef.current(120);
-  }, [flushSpokenExamples, flushRevealQueue, setCoverage]);
+  }, [audibleCharCount, flushSpokenExamples, flushRevealQueue, setCoverage]);
 
   const processLiveMessage = useCallback(
     (message: LiveServerMessage) => {
@@ -2172,25 +2189,12 @@ export default function App() {
           pendingAssistantTextRef.current,
           transcript,
         );
-        // When the voice has already caught up with the audio posted so far,
-        // late transcription belongs to that last packet: extend its endpoint
-        // so the board follows instead of waiting for words already heard.
-        // While the buffer is still deep, the text is genuinely ahead of the
-        // voice and must not be attached early.
-        const lastEntry = audioTimelineRef.current[audioTimelineRef.current.length - 1];
-        if (
-          lastEntry &&
-          lastEntry.chars < pendingAssistantTextRef.current.length &&
-          postedAudioRef.current - audioPlayedSeconds() < 0.6
-        ) {
-          lastEntry.chars = pendingAssistantTextRef.current.length;
-        }
         scheduleTranscriptFlush(assistantId);
         flushSpokenExamples();
         maybeRevealQueuedBlocks();
       }
     },
-    [ensurePendingAssistant, finishPendingAssistant, flushSpokenExamples, maybeRevealQueuedBlocks, playPcmChunk, scheduleTranscriptFlush, audioPlayedSeconds, flushWorklet],
+    [ensurePendingAssistant, finishPendingAssistant, flushSpokenExamples, maybeRevealQueuedBlocks, playPcmChunk, scheduleTranscriptFlush, flushWorklet],
   );
 
   // Server went silent mid-turn (dropped socket, aborted generation, quota)
@@ -2202,11 +2206,24 @@ export default function App() {
     if (!isResponding) return;
     const timer = window.setInterval(() => {
       if (!pendingAssistantIdRef.current) return;
-      if (Date.now() - lastServerActivityRef.current < RESPONSE_WATCHDOG_MS) return;
+      // A suspended AudioContext (tab throttled, device sleep) queues the whole
+      // answer silently. Lectures already guard against it; regular turns need
+      // the same check or the learner hears nothing while the text runs.
+      const context = audioContextRef.current;
+      if (context && context.state === "suspended") {
+        pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "watchdog", state: context.state });
+        void context.resume();
+      }
+      // A turn that already produced audio and then went quiet is the worse
+      // failure for the learner: nothing is on screen yet and the voice just
+      // stops. Do not wait the full prefill window for it.
+      const producedAudio = pendingAudioChunksRef.current.length > 0;
+      const limit = producedAudio ? RESPONSE_STALL_AFTER_AUDIO_MS : RESPONSE_WATCHDOG_MS;
+      if (Date.now() - lastServerActivityRef.current < limit) return;
       pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "watchdog" });
       cutReasonRef.current = "watchdog";
       finishPendingAssistant(true);
-    }, 2_000);
+    }, 1_000);
     return () => window.clearInterval(timer);
   }, [isResponding, finishPendingAssistant]);
 
@@ -2836,13 +2853,10 @@ export default function App() {
     // and a blocking call AUTO-CANCELS the current generation. With a board
     // write every few seconds, blocking was chopping the voice mid-sentence at
     // each write. Non-blocking lets the model keep talking while the write
-    // lands. When the model is already speaking, acknowledge a successful
-    // mechanical write SILENTLY: a WHEN_IDLE response at every board line
-    // prompted an extra generation at the end of each segment, splitting one
-    // explanation into several turns with audible gaps between them. If the
-    // write came before any audio (the model opened with the board), keep the
-    // default so the result actually prompts it to speak the explanation.
-    const audioStarted = pendingAudioChunksRef.current.length > 0 || audioPlayingRef.current;
+    // lands. The acknowledgment is still delivered WHEN_IDLE, never SILENT:
+    // SILENT tells the model there is nothing to answer, so a write that landed
+    // while it was mid-answer could stop the generation right there — the
+    // voice died after a board line and the learner heard a cut sentence.
     const scheduledResponses = responses.map((item) => {
       const payload = item.response as { status?: unknown; type?: unknown };
       const mechanical =
@@ -2855,8 +2869,8 @@ export default function App() {
         payload.status === "ok" ||
         payload.status === "duplicate" ||
         payload.status === "queued";
-      if (!mechanical || !settled || payload.type === "question" || !audioStarted) return item;
-      return { ...item, scheduling: FunctionResponseScheduling.SILENT };
+      if (!mechanical || !settled || payload.type === "question") return item;
+      return { ...item, scheduling: FunctionResponseScheduling.WHEN_IDLE };
     });
     try {
       sessionRef.current?.sendToolResponse({ functionResponses: scheduledResponses });
@@ -3209,11 +3223,7 @@ export default function App() {
     // For a continuation/lecture splice the previous tail may still be playing;
     // its text counts as already heard, and only the new packets move the board.
     turnAudioStartRef.current = postedAudioRef.current;
-    audioTimelineRef.current = [{
-      audioEnd: postedAudioRef.current,
-      chars: appended ? appended.content.length : 0,
-    }];
-    lastAudioCharsRef.current = appended ? appended.content.length : 0;
+    turnTranscriptBaseRef.current = appended ? appended.content.length : 0;
     // A continuation keeps all the text it already spoke: starting the reveal
     // counter at zero made the first new line look like it was 300 characters
     // behind the voice, so it was written before a single new word was heard.
@@ -3707,7 +3717,7 @@ export default function App() {
   // Lecture heartbeat: keeps the lecture moving no matter what the transport
   // does. Idle -> schedule the next segment. A turn the server left open but
   // silent (missed turnComplete, silently ended tool turn) -> close it so the
-  // lecture continues instead of stalling until the 25s global watchdog. The
+  // lecture continues instead of stalling until the global watchdog. The
   // scheduler dedupes, so this cannot double-send segments.
   useEffect(() => {
     if (!lectureActive) return;
