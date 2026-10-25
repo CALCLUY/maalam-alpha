@@ -194,22 +194,74 @@ const WRITE_PACE_MIN_SPEECH_CHARS = 30;
 const TRANSCRIPT_OVERLAP_MIN = 16;
 
 /**
+ * Splits text into sentence-ish pieces without losing the punctuation. Live
+ * transcription arrives in arbitrary chunks, so a fragment without a final mark
+ * still counts as one piece.
+ */
+function splitTranscriptSentences(text: string): string[] {
+  const pieces = text.match(/\s*[^.!؟?…\n]+[.!؟?…\n]*/g);
+  return pieces && pieces.length ? pieces : (text ? [text] : []);
+}
+
+/** Comparison form: ignores spacing and sentence punctuation. */
+function normalizeTranscriptSentence(text: string): string {
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/[.!؟?…،,;؛:]/g, "")
+    .trim();
+}
+
+/** Drops a sentence that starts a chunk when it is exactly the sentence that
+ *  already ends the transcript. Fragmented re-sends otherwise print the last
+ *  sentence twice (and made the learner believe the tutor said it twice). */
+function dropRepeatedOpening(current: string, chunk: string): string {
+  const currentPieces = splitTranscriptSentences(current);
+  const chunkPieces = splitTranscriptSentences(chunk);
+  if (!currentPieces.length || !chunkPieces.length) return chunk;
+  const last = normalizeTranscriptSentence(currentPieces[currentPieces.length - 1]);
+  const first = normalizeTranscriptSentence(chunkPieces[0]);
+  if (last.length < 12 || first.length < 12 || last !== first) return chunk;
+  if (chunkPieces.length === 1) return "";
+  return chunkPieces.slice(1).join("");
+}
+
+/** Collapses two identical sentences that ended up next to each other inside a
+ *  single transcription chunk. Short refrains ("بزاف بزاف") are left alone. */
+function collapseRepeatedSentences(text: string): string {
+  const pieces = splitTranscriptSentences(text);
+  if (pieces.length < 2) return text;
+  const kept: string[] = [];
+  for (const piece of pieces) {
+    const previous = kept[kept.length - 1];
+    if (previous) {
+      const a = normalizeTranscriptSentence(previous);
+      const b = normalizeTranscriptSentence(piece);
+      if (a.length >= 16 && a === b) continue;
+    }
+    kept.push(piece);
+  }
+  return kept.join("");
+}
+
+/**
  * Appends a Live transcription chunk without doubling overlaps. The API
  * sometimes re-sends the tail of what it already sent (or the model repeats
  * its own sentence), which used to print every question twice in the chat.
  */
 function appendTranscript(current: string, chunk: string): string {
   if (!chunk) return current;
-  if (!current) return chunk;
+  if (!current) return collapseRepeatedSentences(chunk);
   if (current.endsWith(chunk)) return current;
-  if (chunk.startsWith(current)) return chunk;
-  const maxOverlap = Math.min(current.length, chunk.length, 400);
+  if (chunk.startsWith(current)) return collapseRepeatedSentences(chunk);
+  const dedupedChunk = dropRepeatedOpening(current, chunk);
+  if (!dedupedChunk) return current;
+  const maxOverlap = Math.min(current.length, dedupedChunk.length, 400);
   for (let len = maxOverlap; len >= TRANSCRIPT_OVERLAP_MIN; len--) {
-    if (current.slice(-len) === chunk.slice(0, len)) {
-      return current + chunk.slice(len);
+    if (current.slice(-len) === dedupedChunk.slice(0, len)) {
+      return collapseRepeatedSentences(current + dedupedChunk.slice(len));
     }
   }
-  return current + chunk;
+  return collapseRepeatedSentences(current + dedupedChunk);
 }
 
 /**
@@ -222,7 +274,7 @@ function buildResumePrompt(content: string): string {
   if (!tail) {
     return "[VOX-DIRECTOR] Your previous answer was cut off by a technical hiccup before it could finish. Continue the answer from where it stopped, in Darija, as one continuous spoken explanation. Do not repeat what the learner already heard, do not restart from the beginning, do not apologise, and do not mention the interruption. [/VOX-DIRECTOR]";
   }
-  return "[VOX-DIRECTOR] Your previous answer was cut off mid-sentence by a technical hiccup. Continue EXACTLY from where you stopped, in Darija, as one continuous spoken explanation. Do not repeat what the learner already heard, do not restart the answer, do not apologise, and do not mention the interruption. The last words the learner heard were:\n\"…" + tail + "\"\n[/VOX-DIRECTOR]";
+  return "[VOX-DIRECTOR] Your previous answer was cut off by a technical hiccup. Continue EXACTLY from where you stopped, in Darija, as one continuous spoken explanation. Do not repeat what the learner already heard, do not restart the answer, do not apologise, and do not mention the interruption. The quoted tail is CONTEXT ONLY: do not say any part of it again — start with the very next sentence. The last words the learner heard were:\n\"…" + tail + "\"\n[/VOX-DIRECTOR]";
 }
 
 const DOC_ACTIONS: { id: TutorAction; label: string; prompt: string }[] = [
@@ -270,9 +322,27 @@ type SubmitTurnOptions = {
 };
 
 const RESPONSE_WATCHDOG_MS = 15_000;
-/** Once a turn has spoken, a stalled generation is cut sooner: the learner is
- *  already sitting in silence and the jitter buffer drains in under two seconds. */
-const RESPONSE_STALL_AFTER_AUDIO_MS = 9_000;
+/** Once a turn has spoken, it is cut only after the buffered voice has drained
+ *  and the server has stayed silent for this long. The old 9 s limit fired while
+ *  several seconds of speech were still queued, so the continuation overlapped
+ *  the tail and the learner heard the same sentence twice. */
+const RESPONSE_STALL_AFTER_AUDIO_MS = 12_000;
+/** A lecture may take longer to produce its first frame (heavy PDF/image context
+ *  or a tool-planning turn). Rebuilding the socket during that wait was the main
+ *  cause of the reconnect loop: the app killed a healthy session, then the next
+ *  segment got the same slow start and was killed again. */
+const LECTURE_FIRST_FRAME_MS = 20_000;
+/** A lecture turn that already produced frames gets this long, counted only once
+ *  its audio buffer has drained (otherwise the learner is still hearing it). */
+const LECTURE_STALL_MS = 12_000;
+/** After this much total silence with no audio at all, send ONE gentle nudge.
+ *  The old 3.5 s nudge could fire while the model was still planning and cancel
+ *  the very turn it was trying to rescue. */
+const LECTURE_NUDGE_MS = 10_000;
+/** Wait for the previous buffered tail to finish before continuing a cut answer.
+ *  Resuming at the heard position while the rest of that same tail kept playing
+ *  is what made a sentence play twice. */
+const RESUME_DRAIN_MAX_WAIT_MS = 4_000;
 /** A server-side cancel arriving this soon after our own send is the tail of the
  *  answer the app itself just cut — it must never kill the new answer. */
 const INTERRUPT_TAIL_WINDOW_MS = 6_000;
@@ -280,6 +350,12 @@ const INTERRUPT_TAIL_WINDOW_MS = 6_000;
 const RESUME_MAX_ATTEMPTS = 2;
 /** A lecture may overrun its clock only by this much while a segment is playing. */
 const LECTURE_HARD_STOP_GRACE_MS = 15_000;
+/** How many consecutive lecture segments may produce nothing at all before the
+ *  app rebuilds the session. Tool-only segments never count: they are normal. */
+const LECTURE_EMPTY_SEGMENTS_BEFORE_REBUILD = 5;
+/** Keep enough audio hashes to catch a whole re-sent sentence after a tool call.
+ *  Twelve packets covered barely a second; a sentence is several times longer. */
+const RECENT_AUDIO_WINDOW = 96;
 
 /** Debug ring buffer of what the Live stream actually sends (mime type, cadence,
  *  underruns). Readable as window.__maalamAudioLog while the app runs. */
@@ -1260,8 +1336,19 @@ export default function App() {
   const lastToolResponseAtRef = useRef(0);
   /** Why the current answer was closed: only involuntary reasons are auto-resumed. */
   const cutReasonRef = useRef<"" | "watchdog" | "transport" | "server">("");
-  /** An answer cut short, waiting to be continued into the same bubble. */
-  const resumeRef = useRef<{ messageId: string; content: string; attempts: number } | null>(null);
+  /** An answer cut short, waiting to be continued into the same bubble.
+   *  fullText keeps the complete transcript so the continuation can start after
+   *  everything the learner will have heard once the tail drains. */
+  const resumeRef = useRef<{
+    messageId: string;
+    content: string;
+    fullText: string;
+    attempts: number;
+  } | null>(null);
+  /** Hard deadline for draining the previous audio tail before a continuation. */
+  const resumeDrainDeadlineRef = useRef(0);
+  /** Re-runs the resume effect while it waits for that tail to drain. */
+  const [resumeTick, setResumeTick] = useState(0);
   /** Resume attempts per assistant message, so a broken answer cannot loop. */
   const resumeAttemptsRef = useRef<{ id: string; count: number }>({ id: "", count: 0 });
   /** One automatic reconnect is allowed to get a pending resume out. */
@@ -1687,7 +1774,7 @@ export default function App() {
           return;
         }
         seen.push(base64Audio);
-        if (seen.length > 12) seen.splice(0, seen.length - 12);
+        if (seen.length > RECENT_AUDIO_WINDOW) seen.splice(0, seen.length - RECENT_AUDIO_WINDOW);
 
         const context = ensureAudio();
         const binary = atob(base64Audio);
@@ -1809,6 +1896,22 @@ export default function App() {
       );
     }
     return 0;
+  }, []);
+
+  /** Seconds of already-received speech still waiting to be heard. A turn is
+   *  not "dead air" while this is non-zero: cutting/resuming then plays the old
+   *  tail and the regenerated sentence on top of each other. */
+  const bufferedAudioSeconds = useCallback(() => {
+    const context = audioContextRef.current;
+    if (!context) return 0;
+    if (workletModeRef.current === "worklet") {
+      return Math.max(0, workletQueuedRef.current);
+    }
+    if (workletModeRef.current === "pending") {
+      const samples = pendingWorkletSamplesRef.current.reduce((total, item) => total + item.length, 0);
+      return samples / context.sampleRate;
+    }
+    return Math.max(0, nextAudioTimeRef.current - context.currentTime);
   }, []);
 
   /**
@@ -2140,8 +2243,10 @@ export default function App() {
         resumeRef.current = {
           messageId: id,
           content: heardText || text,
+          fullText: text || heardText,
           attempts: attempts + 1,
         };
+        resumeDrainDeadlineRef.current = Date.now() + RESUME_DRAIN_MAX_WAIT_MS;
       }
     }
 
@@ -2189,19 +2294,26 @@ export default function App() {
     pendingAssistantTextRef.current = "";
     pendingAudioChunksRef.current = [];
     setIsResponding(false);
-    setResumePending(willResume);
-    if (lectureActiveRef.current) {
-      // A lecture segment that produced NO AUDIO is a failed continuation even
-      // if it wrote text or a board line: the learner sat in silence through the
-      // whole segment. Three of those in a row rebuild the session instead of
-      // letting the lecture run mute for minutes. Only manual stop/disconnect
-      // clear lectureActiveRef before finishing, so a real end never reaches
-      // this counter.
-      if (!audioChunks.length) {
-        lectureEmptyTurnsRef.current += 1;
-      } else {
+    // A second finish (onerror followed by onclose, or connect() closing an
+    // already-finished turn) must not erase a resume queued by the first one.
+    if (id) {
+      setResumePending(willResume);
+    }
+    if (lectureActiveRef.current && id) {
+      // Only a REAL lecture turn can be an empty segment. Tool-only segments are
+      // normal (the model writes the board before speaking), and stop/connect
+      // calls a finish with no pending turn at all. Counting those as failures
+      // incremented this on every reconnect and eventually rebuilt the socket in
+      // a loop, which is exactly what "the lecture keeps disconnecting" was.
+      const producedAnything = Boolean(text)
+        || audioChunks.length > 0
+        || turnWritesRef.current > 0
+        || turnToolsRef.current > 0;
+      if (producedAnything) {
         lectureEmptyTurnsRef.current = 0;
         lectureSilentReconnectsRef.current = 0;
+      } else {
+        lectureEmptyTurnsRef.current += 1;
       }
     }
 
@@ -2252,19 +2364,27 @@ export default function App() {
       if (!content) return;
 
       if (content.interrupted) {
-        // During a lecture the app drives every segment, so a server-side cancel
-        // would only punch a silent hole in the middle of the lesson. (A real
-        // learner barge-in already cuts the turn before its new message is sent.)
-        if (lectureActiveRef.current) {
-          pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "interrupted" });
-          return;
-        }
         // A cancel that lands before ANY payload of the new learner turn is the
         // tail of the previous generation the learner just interrupted. That
         // marker also means every later audio packet belongs to the NEW answer,
-        // so stop dropping its first syllables.
+        // so stop dropping its first syllables. This check must come BEFORE the
+        // lecture branch: a lecture sends the next segment immediately, and a
+        // stale cancel from the previous segment used to close the fresh one.
         if (freshTurnPendingRef.current) {
           staleAudioUntilRef.current = 0;
+          return;
+        }
+        pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "interrupted" });
+        if (lectureActiveRef.current) {
+          // The server cancelled the generation (it never happens from a learner
+          // barge-in: the app has no microphone). Close the segment instead of
+          // leaving it pending until the watchdog, then let the scheduler send
+          // the next beat. Already-buffered audio keeps playing; the next audio
+          // is appended after it, so nothing is cut or played twice.
+          if (pendingAssistantIdRef.current) {
+            cutReasonRef.current = "server";
+            finishPendingAssistant(true);
+          }
           return;
         }
         // The app has no microphone: EVERY server cancel is the tail of a turn
@@ -2274,13 +2394,12 @@ export default function App() {
         // "الجواب تقطع قبل ما يكمل" bubble. Only a cancel long after our own send
         // is a real server-side cancellation.
         if (Date.now() - lastClientSendAtRef.current < INTERRUPT_TAIL_WINDOW_MS) {
-          pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "interrupted" });
           return;
         }
-        pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "interrupted" });
         // Do NOT hard-cut the buffered tail: the server simply stopped sending.
-        // Keep it buffered while the continuation is generated, so the new
-        // packets join the old tail instead of starting after a fresh silence.
+        // Keep it buffered while the continuation is generated; the resume path
+        // waits for it to drain and then anchors the continuation after the full
+        // text, so the tail is heard once instead of twice.
         cutReasonRef.current = "server";
         finishPendingAssistant(true);
         return;
@@ -2305,6 +2424,7 @@ export default function App() {
 
       // This frame belongs to the live turn: later turn markers are genuine.
       freshTurnPendingRef.current = false;
+      turnSawServerActivityRef.current = true;
 
       for (const part of content.modelTurn?.parts ?? []) {
         const audioData = part.inlineData?.data;
@@ -2357,12 +2477,16 @@ export default function App() {
       const producedAudio = pendingAudioChunksRef.current.length > 0;
       const limit = producedAudio ? RESPONSE_STALL_AFTER_AUDIO_MS : RESPONSE_WATCHDOG_MS;
       if (Date.now() - lastServerActivityRef.current < limit) return;
+      // The server can finish generating a burst before the learner has heard it.
+      // That is not dead air: resuming now would talk over the buffered tail and
+      // repeat the same sentence. Wait until the voice has actually drained.
+      if (bufferedAudioSeconds() > 0.4) return;
       pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "watchdog" });
       cutReasonRef.current = "watchdog";
       finishPendingAssistant(true);
     }, 1_000);
     return () => window.clearInterval(timer);
-  }, [isResponding, finishPendingAssistant]);
+  }, [bufferedAudioSeconds, isResponding, finishPendingAssistant]);
 
   /* -------------------------- Blackboard tool calls ---------------------- */
   const [boardErasing, setBoardErasing] = useState(false);
@@ -3070,8 +3194,9 @@ export default function App() {
 
       ensureAudio();
       // Reconnecting to continue a cut answer keeps the already-buffered tail
-      // playing; any other (re)connect starts from a clean slate.
-      if (!resumeRef.current) stopAudio();
+      // playing; a lecture reconnect does the same so a socket hiccup never cuts
+      // a word mid-sentence. Any other (re)connect starts from a clean slate.
+      if (!resumeRef.current && !lectureActiveRef.current) stopAudio();
       finishPendingAssistant(true);
       freshTurnPendingRef.current = false;
       staleAudioUntilRef.current = 0;
@@ -3087,7 +3212,12 @@ export default function App() {
       // history: the caller can ask for a clean, smaller session instead.
       const history = skipResumeHistoryRef.current
         ? { turns: [], truncated: false }
-        : buildResumeHistory(messagesRef.current);
+        : buildResumeHistory(messagesRef.current, {
+            // A lecture cut by the socket must still know what it had already
+            // said; omitting the interrupted segment made it repeat its last
+            // sentence as an opener after every reconnect.
+            includeInterrupted: lectureActiveRef.current,
+          });
       skipResumeHistoryRef.current = false;
       let connectionClosed = false;
 
@@ -3112,7 +3242,6 @@ export default function App() {
             onmessage: (message) => {
               if (connectionId !== connectionIdRef.current) return;
               lastServerActivityRef.current = Date.now();
-              turnSawServerActivityRef.current = true;
               if (message.goAway) {
                 // The server is winding the session down. Do not wait for the
                 // socket to die mid-sentence: end the turn and hand the learner
@@ -3135,6 +3264,7 @@ export default function App() {
                   // previous turn can still arrive AFTER this first tool call
                   // (the model often writes on the board before speaking), and it
                   // must not kill an answer that has only written so far.
+                  turnSawServerActivityRef.current = true;
                   processToolCall(message.toolCall);
                   return;
                 }
@@ -3158,6 +3288,15 @@ export default function App() {
               if (!lectureActiveRef.current) {
                 setError(event.message || "وقع مشكل فالاتصال بـ maalam Live.");
               }
+              // Close the broken socket NOW. Leaving it open let late audio and
+              // turn markers from the failed generation arrive during the
+              // reconnect delay and get appended to the new answer.
+              try {
+                sessionRef.current?.close();
+              } catch {
+                // Already closed.
+              }
+              sessionRef.current = null;
               setConnectionStatus("disconnected");
               cutReasonRef.current = "transport";
               finishPendingAssistant(true);
@@ -3313,6 +3452,7 @@ export default function App() {
     // asked something new, so the old answer must not resume on top of it.
     if (!options.resume) {
       resumeRef.current = null;
+      resumeDrainDeadlineRef.current = 0;
       setResumePending(false);
       resumeReconnectRef.current = false;
     }
@@ -3333,7 +3473,6 @@ export default function App() {
     turnWritesRef.current = 0;
     turnToolsRef.current = 0;
     lastToolResponseAtRef.current = 0;
-    if (!options.preservePlayback) recentAudioHashesRef.current = [];
     pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "turn-start", turn: turnSeqRef.current });
 
     ensureAudio();
@@ -3552,10 +3691,26 @@ export default function App() {
       }
       return;
     }
+    // The cut answer's already-buffered tail may still be playing. Sending the
+    // continuation now would make the model repeat the words while that tail is
+    // still being heard — the "same sentence plays twice" bug. Let the tail
+    // drain first (or force a cut at the deadline), then anchor the continuation
+    // AFTER the full text the learner has now heard.
+    const buffered = bufferedAudioSeconds();
+    if (buffered > 0.2 && Date.now() < resumeDrainDeadlineRef.current) {
+      const timer = window.setTimeout(() => setResumeTick((tick) => tick + 1), 150);
+      return () => window.clearTimeout(timer);
+    }
+    const mustCut = buffered > 0.2;
+    const drainedAnchor = mustCut
+      ? resume.fullText.slice(0, Math.max(0, audibleCharCount())).trim()
+      : resume.fullText.trim();
     resumeRef.current = null;
+    resumeDrainDeadlineRef.current = 0;
     resumeReconnectRef.current = false;
     setResumePending(false);
-    const sent = submitTurn(buildResumePrompt(resume.content), "message", {
+    if (mustCut) stopAudio();
+    const sent = submitTurn(buildResumePrompt(drainedAnchor || resume.content), "message", {
       hideUserMessage: true,
       appendTo: resume.messageId,
       resume: true,
@@ -3565,7 +3720,7 @@ export default function App() {
       // it is; the next learner turn reconnects through the normal path.
       resumeRef.current = resume;
     }
-  }, [apiKey, connect, connectionStatus, resumePending, submitTurn]);
+  }, [apiKey, audibleCharCount, bufferedAudioSeconds, connect, connectionStatus, resumePending, resumeTick, stopAudio, submitTurn]);
 
   const showLectureNotice = useCallback((text: string) => {
     if (mediaNoticeTimerRef.current !== null) window.clearTimeout(mediaNoticeTimerRef.current);
@@ -3634,6 +3789,12 @@ export default function App() {
     lectureArmedRef.current = false;
     setLectureArmed(false);
     lectureActiveRef.current = true;
+    resumeRef.current = null;
+    resumeDrainDeadlineRef.current = 0;
+    setResumePending(false);
+    // A new lecture starts on a clean slate: never let an old tutoring answer
+    // keep playing under the lecture intro.
+    stopAudio();
     configureWorkletBuffers(true);
     lectureEndsAtRef.current = endsAt;
     lectureSegmentsRef.current = 0;
@@ -3687,6 +3848,7 @@ export default function App() {
     lectureEndsAtRef.current = null;
     lectureSeedRef.current = null;
     lectureSilentReconnectsRef.current = 0;
+    lectureEmptyTurnsRef.current = 0;
     // The session still runs (or is being built with) the lecture system
     // instruction: the next learner turn rebuilds it into normal tutoring (see
     // submitTurn's handoff).
@@ -3735,13 +3897,14 @@ export default function App() {
       showLectureNotice("سالى الوقت — سالات المحاضرة.");
       return;
     }
-    if (lectureEmptyTurnsRef.current >= 3) {
-      // A run of empty turns must never kill a lecture: rebuild the session
-      // (dropping the restored history once it has already been retried) and
-      // keep teaching. Only the clock ends a lecture.
+    if (lectureEmptyTurnsRef.current >= LECTURE_EMPTY_SEGMENTS_BEFORE_REBUILD) {
+      // A long run of segments that produced NOTHING (not even a tool call) is
+      // the only reason to rebuild the session. Tool-only turns are normal and
+      // never reach this counter. Only the clock ends a lecture.
       lectureEmptyTurnsRef.current = 0;
       if (apiKey.trim()) {
         if (lectureSilentReconnectsRef.current >= 2) skipResumeHistoryRef.current = true;
+        lectureSilentReconnectsRef.current += 1;
         void connect(apiKey);
         return;
       }
@@ -3759,7 +3922,7 @@ export default function App() {
       boardEmpty: boardBlocksRef.current.length === 0,
     });
     const sent = submitTurn(
-      "كمّل المحاضرة من فين وقفتي بالضبط — كمّل القصة من النقطة اللي وقفتي فيها، بلا ما تعاود من اللول وبلا ما تسولني حتى سؤال.",
+      "ابدا الجزء الموالي ديال المحاضرة دابا، من النقطة اللي وقفتي فيها. ممنوع تعاود الجملة الأخيرة ولا أي جملة سبق ليك قلتيها، حتى بشكل مختصر ولا كمقدمة: ابدا مباشرة بجملة جديدة كتزيد القصة قدام. بلا ما تسولني حتى سؤال.",
       "lecture",
       {
         lectureContext,
@@ -3897,18 +4060,16 @@ export default function App() {
       }
       if (pendingAssistantIdRef.current) {
         const idleMs = Date.now() - lastServerActivityRef.current;
-        // Fast recovery for the known 3.8 Live failure: after an async tool
-        // result the model can keep the turn open but produce no audio. A
-        // lecture cannot wait for the 10 s watchdog — that is most of a beat
-        // of dead air. Nudge once, only when the tool result is already old and
-        // not a single audio packet has arrived for this turn.
-        const toolIdleMs = lastToolResponseAtRef.current
-          ? Date.now() - lastToolResponseAtRef.current
-          : 0;
+        const buffered = bufferedAudioSeconds();
+        // ONE nudge, only after a long total silence and only when this turn has
+        // produced no audio at all. There is nothing to overlap, so the nudge
+        // cannot repeat a sentence. The old 3.5 s version fired while the model
+        // was still planning and could cancel the turn it was trying to rescue.
         if (
           pendingAudioChunksRef.current.length === 0 &&
-          toolIdleMs > 3_500 &&
-          idleMs > 3_500 &&
+          pendingAssistantTextRef.current.length === 0 &&
+          buffered <= 0.2 &&
+          idleMs > LECTURE_NUDGE_MS &&
           lastSpeechNudgeSeqRef.current !== turnSeqRef.current &&
           sessionRef.current
         ) {
@@ -3935,37 +4096,36 @@ export default function App() {
           } catch {
             // Socket already gone; the reconnect path takes over.
           }
+          // Give the nudge a full window before declaring the segment dead.
+          return;
         }
-        // A turn that never produced a single frame gets a grace window (heavy
-        // PDF/image contexts are slow to start, but a silent lecture teaches
-        // nothing, so it is tighter than the normal-mode window); a turn that
-        // went silent mid-generation is cut sooner.
+        // A turn that never produced a frame gets a long grace window (heavy
+        // PDF/image contexts and tool planning are slow); a turn that already
+        // produced frames gets a shorter one. Neither is a transport failure.
         const sawActivity = turnSawServerActivityRef.current;
-        const stallLimit = sawActivity ? 8_000 : 12_000;
+        const stallLimit = sawActivity ? LECTURE_STALL_MS : LECTURE_FIRST_FRAME_MS;
+        // Never cut a turn while the learner is still hearing its buffered
+        // voice: the next segment would be queued on top of the old tail and the
+        // model would repeat the bridge. Only a drained buffer is dead air.
+        if (buffered > 0.4) return;
         if (idleMs > stallLimit) {
+          pushAudioLog(audioLogRef.current, {
+            at: Date.now(),
+            kind: "watchdog",
+            state: "lecture-stall",
+          });
+          // Close the segment and let the scheduler send the next one on the
+          // SAME session. The old proactive connect() here tore down a healthy
+          // socket whenever the model was simply slow, which is what turned one
+          // slow segment into an endless reconnect loop.
           finishPendingAssistant(true);
-          // A whole segment with not ONE server frame means the socket is very
-          // likely dead even though it still reports "connected": rebuild it
-          // proactively instead of letting the lecture fall silent. The first
-          // rebuilds keep the restored history; later ones drop it entirely in
-          // case the context itself is what the server chokes on.
-          if (
-            !sawActivity &&
-            lectureActiveRef.current &&
-            apiKey.trim() &&
-            lectureSilentReconnectsRef.current < 4
-          ) {
-            lectureSilentReconnectsRef.current += 1;
-            if (lectureSilentReconnectsRef.current >= 2) skipResumeHistoryRef.current = true;
-            void connect(apiKey);
-          }
         }
         return;
       }
       lectureScheduleRef.current(350);
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [apiKey, connect, connectionStatus, finishPendingAssistant, lectureActive]);
+  }, [bufferedAudioSeconds, connectionStatus, finishPendingAssistant, lectureActive]);
 
   // SESSION HANDOFF: the system instruction is chosen when the live session is
   // built (lecture protocol vs guided-mastery tutoring). Whenever a session comes
@@ -4368,6 +4528,9 @@ export default function App() {
     pendingAssistantIdRef.current = null;
     pendingAssistantTextRef.current = "";
     pendingAudioChunksRef.current = [];
+    resumeRef.current = null;
+    resumeDrainDeadlineRef.current = 0;
+    setResumePending(false);
     boardBlocksRef.current = [];
     boardConnectorsRef.current = [];
     pendingExamplesRef.current = [];
@@ -4391,6 +4554,9 @@ export default function App() {
     setMediaPickerOpen(false);
     connectionIdRef.current += 1;
     finishPendingAssistant(true);
+    resumeRef.current = null;
+    resumeDrainDeadlineRef.current = 0;
+    setResumePending(false);
     sessionRef.current?.close();
     sessionRef.current = null;
     stopAudio();

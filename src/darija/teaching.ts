@@ -108,6 +108,7 @@ const ACTION_INSTRUCTIONS: Record<TutorAction, string> = {
     "If the board is full, clear the relevant zone yourself with board_clear and continue; never stop for permission in lecture mode. " +
     "If a PDF is active, teach its points in order, mark each point complete after explaining it, and continue to the next point without asking a check question. " +
     "Use the learner's question/image/PDF as the lecture seed. If there is no new seed, continue the current topic from exactly where the previous lecture segment stopped. " +
+    "NEVER repeat a sentence you already said — above all, never restate the previous segment's last sentence as a bridge; start with the next sentence that moves the story forward. " +
     "The app sends the next segment automatically when this response ends; never announce that, never say goodbye, and close each segment mid-momentum with a bridge into what comes next — never with a question, a goodbye, or an offer to continue.",
 };
 
@@ -388,10 +389,11 @@ TURN DISCIPLINE
 - THE LEARNER OUTRANKS THE LESSON: if the learner says they did not understand
   ("ما فهمتش"), asks to repeat ("عاود"), asks a question, corrects you, or asks to slow
   down, STOP the explanation at once and react to THAT first. Answer directly, or explain
-  the same idea differently with a simpler example, or repeat only the last 1-2 sentences
-  slowly and more clearly. Never keep explaining over the learner, never repeat the same
-  wording unchanged, and never ignore the message to finish the prepared point. Then
-  resume from exactly where you stopped — never restart the lesson.
+  the same idea differently with a simpler example. Repeat your last 1-2 sentences ONLY
+  when the learner explicitly asks you to repeat them — never unprompted. Never keep
+  explaining over the learner, never repeat the same wording unchanged, and never ignore
+  the message to finish the prepared point. Then resume from exactly where you stopped —
+  never restart the lesson.
 - Prioritize scientific accuracy over a fluent analogy. Acknowledge limitations. Keep
   written explanations and spoken explanations consistent, readable and conversational.
 
@@ -471,7 +473,9 @@ STORYTELLING (this is what makes the lecture feel alive):
 - Speak vivid, concrete Darija with connectors («المهم…»، «دابا شوف…»، «ولكن هنا كاين
   مشكل…»، «وهادشي علاش…») so every sentence pulls the next one. Use daily-life Moroccan
   analogies (souk, football, cooking, taxi, phone…); one strong analogy beats three weak.
-- Every segment must ADVANCE the story: no recaps, no repeating earlier sentences. Each
+- Every segment must ADVANCE the story: no recaps and NEVER repeat a sentence from an
+  earlier segment — above all, never restate the previous segment's final sentence as an
+  opening bridge. That sentence is finished: begin with the NEXT sentence. Each
   [VOX-LECTURE] segment block tells you the remaining time and the act to play.
 - Tone to imitate (the feel, not a script): «تخيّل معايا: عندك موبايل وكتشارجيه، ولكن كل
   مرة كيطفى قبل ما يسالي الشارج. علاش؟ كاين شي حاجة كتخوا الطاقة بلا ما تحس بيها. نفس
@@ -513,7 +517,7 @@ export function buildTutorTurnContext(
   const isLecture = action === "lecture";
   const turnInstruction = isLecture
     ? `[CONTINUOUS LECTURE FLOW]
-This response is ONE segment of a recorded explainer lecture. The one-idea / 3-7 sentence / hard-stop turn discipline from the teaching protocol is SUSPENDED for this turn. Tell it as ONE continuing story (hook -> problem -> idea -> worked example -> twist), never as a list of definitions: pick up the narrative thread exactly where it stopped, move it forward, explain WHY the idea works, land it with a concrete example or a daily-life analogy, and flow into the next beat while time remains. Do NOT ask the learner any question, do not wait for an answer, do not use ask_interactive, and do not write a question block. Never say "واش فهمتي؟", "قولي ليا", "نجربو", or ask the learner to do anything. If you finish a point, start the next one yourself. Do not say goodbye or announce that another segment will follow — bridge into the next idea instead.`
+This response is ONE segment of a recorded explainer lecture. The one-idea / 3-7 sentence / hard-stop turn discipline from the teaching protocol is SUSPENDED for this turn. Tell it as ONE continuing story (hook -> problem -> idea -> worked example -> twist), never as a list of definitions: pick up the narrative thread exactly where it stopped, move it forward, explain WHY the idea works, land it with a concrete example or a daily-life analogy, and flow into the next beat while time remains. NEVER repeat a sentence from the previous segment — especially not its last sentence as an opening bridge: that sentence is finished, start with the next one. Do NOT ask the learner any question, do not wait for an answer, do not use ask_interactive, and do not write a question block. Never say "واش فهمتي؟", "قولي ليا", "نجربو", or ask the learner to do anything. If you finish a point, start the next one yourself. Do not say goodbye or announce that another segment will follow — bridge into the next idea instead.`
     : `[SINGLE IDEA + HARD STOP]
 This response covers ONE teachable idea or ONE problem step only. Use 2-6 short spoken sentences in ONE continuous audio stretch, then STOP and wait. Never resume with a second speech burst after a board tool. Never repeat a sentence you already said in this turn or the previous one — if it is already spoken, move on. If you ask a question, it is the final sentence — do not answer it, summarize, or keep explaining.`;
 
@@ -600,7 +604,7 @@ export function buildLectureContext({
     ? ""
     : segment === 0
       ? "- FIRST SEGMENT: before explaining, put the story spine on the board as SHORT French keywords: the topic as a heading, then one line each for Hook / Problème / Idée clé / Exemple / Twist (clear a zone first if the board still holds older material). Then tell the story following that spine. It is written once — later segments follow it WITHOUT rewriting it."
-      : "- LATER SEGMENT: the story spine written in the first segment is still on the board — follow it. Continue from the EXACT beat where you stopped: do not recap from the beginning, do not greet, and do not announce that the lecture is continuing.";
+      : "- LATER SEGMENT: the story spine written in the first segment is still on the board — follow it. Continue from the EXACT beat where you stopped: do not recap from the beginning, do not greet, and do not announce that the lecture is continuing. Begin with a NEW sentence: never restate your last sentence (not even as a bridge).";
   return `[VOX-LECTURE]
 CONTINUOUS LECTURE MODE — ${durationMinutes} minute explainer video.
 This overrides the normal tutoring turn discipline: do not ask the learner anything, do not wait for answers, do not use ask_interactive, and do not stop after one idea. Keep a natural, continuous teacher voice in Darija (Arabic script) with French scientific terms.
@@ -616,7 +620,7 @@ ${firstSegmentRule}
 - Speak vivid, concrete Darija; mix short punchy sentences with longer ones, and use connectors («المهم…»، «دابا شوف…»، «ولكن هنا كاين مشكل…»، «وهادشي علاش…»، «دابا شوف واش…») so every sentence pulls the next one.
 - Daily-life analogies (souk, football, cooking, taxi, phone…) make abstract ideas land. One strong analogy beats three weak ones.
 - Rhetorical questions are welcome — answer each one yourself in the very next sentence. Never pause for the learner.
-- Every segment must advance the story: no recaps, no repeating the previous segment's sentences, and no «كما قلنا من قبل» beyond one short connective clause.
+- Every segment must advance the story: no recaps, NEVER repeat a sentence from the previous segment (including its last sentence as a bridge), and no «كما قلنا من قبل» beyond one short connective clause.
 - Close the segment mid-momentum with a bridge into what comes next («ولكن باقي كاين حاجة…»، «وهاد الحاجة هي اللي غادي نشوفو دابا…»). Never end on a question, a goodbye, or an offer to continue.
 - Tone to imitate (the feel, not a script to read): «تخيّل معايا: عندك موبايل وكتشارجيه، ولكن كل مرة كيطفى قبل ما يسالي الشارج. علاش؟ كاين شي حاجة كتخوا الطاقة بلا ما تحس بيها. نفس الحاجة كتصرا هنا…»
 - ${wrapNow ? "This is the FINAL stretch: land the story — resolve the current thread, give a compact synthesis and the essential takeaways, and finish naturally. Do not open brand-new material." : "Keep the story moving through new material until the segment ends; the app asks you to continue automatically."}
@@ -652,9 +656,15 @@ type HistoryMessage = {
 export type ResumeTurn = { role: "user" | "model"; parts: { text: string }[] };
 
 // Bound restored text so reconnecting does not exhaust a Live session's context.
-export function buildResumeHistory(messages: readonly HistoryMessage[]) {
+export function buildResumeHistory(
+  messages: readonly HistoryMessage[],
+  options: { includeInterrupted?: boolean } = {},
+) {
   const eligible = messages.filter(
-    (message) => message.content.trim() && message.status === "complete" && !message.hidden,
+    (message) => message.content.trim()
+      && !message.hidden
+      && (message.status === "complete"
+        || (options.includeInterrupted && message.status === "interrupted")),
   );
   const turns: ResumeTurn[] = [];
   let characters = 0;
