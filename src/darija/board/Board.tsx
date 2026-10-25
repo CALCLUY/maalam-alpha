@@ -194,10 +194,27 @@ function hashString(s: string): number {
   return Math.abs(h) || 1;
 }
 
-/** Rough total writing time, used only to sequence one block after another. */
+/**
+ * Rough total writing time, used only to sequence one block after another.
+ * Chalk speed calibrated to the tutor's voice: roughly one written character
+ * per 60 ms in Arabic and 48 ms in French, plus a small pause per word. The old
+ * pace wrote a whole line in about half the time it took to say it, so the
+ * board kept jumping ahead of the explanation. The same function feeds the
+ * start delays between lines, so writing and layout stay in step.
+ */
+const WRITE_SECONDS_PER_CHAR_RTL = 0.06;
+const WRITE_SECONDS_PER_CHAR_LTR = 0.048;
+const WRITE_SECONDS_PER_WORD = 0.022;
+
 function estimateWriteSeconds(text: string, rtl: boolean): number {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  return Math.min(4.5, Math.max(0.45, (text.length * (rtl ? 0.07 : 0.055)) / 1.35)) + words.length * 0.02;
+  const clean = text.replace(/\s+/g, " ").trim();
+  const words = clean.split(" ").filter(Boolean).length;
+  const chars = clean.replace(/\s+/g, "").length;
+  const base = chars * (rtl ? WRITE_SECONDS_PER_CHAR_RTL : WRITE_SECONDS_PER_CHAR_LTR)
+    + words * WRITE_SECONDS_PER_WORD;
+  // Same cap as the per-line animation: a delay that assumes a longer write
+  // than the animation actually takes leaves a visible gap before the next line.
+  return Math.min(2.6, Math.max(0.42, base));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -530,11 +547,14 @@ function lineDurationSec(line: string, index: number, seed: number, rtl: boolean
   // key line then explains it). Punctuation keeps its small real-hand pause.
   const chars = line.replace(/\s+/g, "").length;
   const words = line.trim().split(/\s+/).filter(Boolean).length;
-  const base = chars * (rtl ? 0.042 : 0.035) + words * 0.012;
+  // Match the same speech-rate constants used for inter-line delays, otherwise
+  // the next line starts before the current one has finished writing.
+  const base = chars * (rtl ? WRITE_SECONDS_PER_CHAR_RTL : WRITE_SECONDS_PER_CHAR_LTR)
+    + words * WRITE_SECONDS_PER_WORD;
   const punctuationPause = /[.!?؟؛:：]$/.test(line.trim()) ? 0.09 : /[,،]$/.test(line.trim()) ? 0.05 : 0;
   const raw = Math.sin(seed * 127.1 + index * 311.7) * 43758.5453;
   const jitter = 0.9 + (raw - Math.floor(raw)) * 0.2; // stable ±10% human variance
-  return Math.min(1.8, Math.max(0.42, base * jitter + punctuationPause));
+  return Math.min(2.6, Math.max(0.42, base * jitter + punctuationPause));
 }
 
 /**
