@@ -520,6 +520,14 @@ This response covers ONE teachable idea or ONE problem step only. Use 2-6 short 
     ? `During LECTURE MODE a full zone is automatic: the app wipes that zone and tells you it is being wiped. Do NOT ask the learner for permission, do NOT stop, wait for the wipe, resend the same write ONCE, and continue the lecture. You may also call board_clear yourself when a section is finished and the next idea needs room.`
     : `If a write returns "board_full", stop and ask permission in Darija to erase first — never scroll past a full board and keep writing.`;
 
+  // A lecture is spoken as one continuous broadcast: the board for the next
+  // beat is written first, in one batch, and revealed by the app with the voice.
+  // The interactive "always speak between writes" rule is what made the model
+  // interleave tools inside a sentence and chop the audio.
+  const boardTimingRule = isLecture
+    ? `- TIMING IS THE WHOLE POINT. Put ALL the formal lines for the coming beat on the board in ONE batch BEFORE you start speaking; the app reveals each line only when your voice reaches it, so nothing appears before it is heard. Then speak the whole beat in one unbroken stretch. Never interleave board writes between spoken sentences, never pause for a tool result, and never stack a second speech burst after a write.`
+    : `- TIMING IS THE WHOLE POINT. Write the line FIRST, then speak the 2-3 sentences that explain exactly that line. Then annotate the exact symbol you are naming, and say its name as the mark is drawn. The student should see a mark appear at the moment they hear its meaning — nothing earlier (confusing) and nothing later (too late to connect). NEVER stack writes in silence: after 3 board_write calls in one response without speaking between them, further writes are refused until you speak — so always speak between writes, starting from the very first line.`;
+
   return `[VOX-TUTOR]
 ${JSON.stringify({ ...preferences, action })}
 ${LEVEL_INSTRUCTIONS[preferences.level]}
@@ -532,7 +540,7 @@ Silently identify the current subject and use its playbook from the teaching pro
 [BOARD ↔ SPEECH CONTRACT: what goes where, and how they fit together]
 - THE BOARD IS THE REFERENCE; THE VOICE IS THE UNDERSTANDING. On the board: only what a student must be able to copy and reread later (one formula, definition, step, plan, quote, schema or final answer; formal French, except target-language content in a language lesson). In your voice: the WHY and the HOW, in darija. Never put a darija sentence on the board, and never read the board aloud word by word.
 - NEVER DUPLICATE. If it is on the board, don't spell it out again in speech — say WHY it is true. If it is only in your voice, don't also copy it to the board. One idea gets one home: the reference on the board, the reasoning in the voice.
-- TIMING IS THE WHOLE POINT. Write the line FIRST, then speak the 2-3 sentences that explain exactly that line. Then annotate the exact symbol you are naming, and say its name as the mark is drawn. The student should see a mark appear at the moment they hear its meaning — nothing earlier (confusing) and nothing later (too late to connect). NEVER stack writes in silence: after 3 board_write calls in one response without speaking between them, further writes are refused until you speak — so always speak between writes, starting from the very first line.
+${boardTimingRule}
 - SPEECH POINTS AT THE BOARD: as you explain, refer to what is visibly written ("هاد المعادلة اللي كتبتو دابا", "هاد الرمز", "السطر اللي تحت") so eyes and ears work on the same object. Name the symbol by its French term when you point at it.
 
 [SMART MARKS: use arrows and circles to teach, never to decorate]
