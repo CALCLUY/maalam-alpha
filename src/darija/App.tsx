@@ -221,16 +221,16 @@ const OUTPUT_SAMPLE_RATE = 24_000;
  *  a short generation pause (code switch, tool call, main-thread hitch) never
  *  reaches the learner as a cut. A stall bigger than the buffer teaches the next
  *  turn how much more to prebuffer. */
-const AUDIO_LEAD_MIN = 0.5;
-const AUDIO_LEAD_MAX = 1.8;
+const AUDIO_LEAD_MIN = 0.8;
+const AUDIO_LEAD_MAX = 2.4;
 /** After a mid-turn stall, resume with a learned cushion: the pause that just
  *  happened tells us how long code-switch / new-line generation gaps are, and
  *  keeping that much audio buffered makes the NEXT one inaudible instead of
  *  cutting the voice again. */
-const AUDIO_RESUME_LEAD = 0.25;
-const AUDIO_RESUME_LEAD_MAX = 0.6;
+const AUDIO_RESUME_LEAD = 0.3;
+const AUDIO_RESUME_LEAD_MAX = 0.9;
 /** How often streaming transcription may re-render the app while audio plays. */
-const TRANSCRIPT_FLUSH_MS = 80;
+const TRANSCRIPT_FLUSH_MS = 100;
 /** If a turn goes completely silent this long, release it so the UI never locks. */
 type SubmitTurnOptions = {
   documentContext?: string;
@@ -268,6 +268,7 @@ type AudioLogEntry = {
   gapMs?: number;
   leadMs?: number;
   resumeMs?: number;
+  bufferedMs?: number;
   state?: string;
   ctxRate?: number;
   turn?: number;
@@ -289,6 +290,63 @@ function parsePcmFormat(mimeType?: string): { rate: number; channels: number } {
   const channelMatch = mimeType?.match(/channels?\s*=\s*(\d+)/i);
   const channels = channelMatch ? Math.max(1, Math.min(2, Number(channelMatch[1]))) : 1;
   return { rate: rawRate >= 8_000 && rawRate <= 96_000 ? rawRate : OUTPUT_SAMPLE_RATE, channels };
+}
+
+type ResampleState = {
+  sourceRate: number;
+  /** Last source sample of the previous packet (seam interpolation). */
+  last: number;
+  /** Fractional source position carried into this packet. */
+  phase: number;
+  primed: boolean;
+};
+
+/**
+ * Stateful linear resampler from the model's PCM rate to the AudioContext rate.
+ *
+ * Scheduling one AudioBuffer per ~100 ms Live packet and letting the browser
+ * resample each buffer independently restarts the browser's resampler at every
+ * packet boundary. On 44.1 kHz devices (non-integer ratio) that leaves a small
+ * edge discontinuity every packet — audible as a click / chopped word exactly at
+ * code-switch and line boundaries. Carrying the last source sample and the
+ * fractional phase across packets converts the stream as ONE continuous signal,
+ * so packet seams disappear.
+ */
+function resamplePcm(
+  input: Float32Array,
+  sourceRate: number,
+  targetRate: number,
+  state: ResampleState,
+): Float32Array {
+  if (sourceRate === targetRate) {
+    state.sourceRate = sourceRate;
+    state.last = input[input.length - 1] ?? 0;
+    state.phase = 0;
+    state.primed = true;
+    return input;
+  }
+  if (!state.primed || state.sourceRate !== sourceRate) {
+    state.sourceRate = sourceRate;
+    state.last = input[0] ?? 0;
+    state.phase = 0;
+    state.primed = true;
+  }
+  const step = sourceRate / targetRate;
+  // Input timeline for interpolation: [previous packet's last sample, ...packet].
+  const total = input.length + 1;
+  const count = Math.max(0, Math.ceil((total - 1 - state.phase) / step));
+  const output = new Float32Array(count);
+  let pos = state.phase;
+  for (let index = 0; index < count; index += 1, pos += step) {
+    const at = Math.floor(pos);
+    const fraction = pos - at;
+    const a = at === 0 ? state.last : (input[at - 1] ?? state.last);
+    const b = input[at] ?? a;
+    output[index] = a + (b - a) * fraction;
+  }
+  state.phase = Math.max(0, pos - (total - 1));
+  state.last = input[input.length - 1] ?? state.last;
+  return output;
 }
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected";
@@ -954,6 +1012,13 @@ export default function App() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const nextAudioTimeRef = useRef(0);
+  /** Continuous resampler state (model PCM rate → AudioContext rate). */
+  const resampleStateRef = useRef<ResampleState>({
+    sourceRate: 0,
+    last: 0,
+    phase: 0,
+    primed: false,
+  });
   /** Adaptive playback lead (seconds): grows on underrun, relaxes when smooth. */
   const leadRef = useRef(AUDIO_LEAD_MIN);
   /** True once audio has been scheduled since the last stop (stall detection). */
@@ -1010,12 +1075,21 @@ export default function App() {
   /* ------------------------------- Audio -------------------------------- */
   const ensureAudio = useCallback(() => {
     if (!audioContextRef.current || audioContextRef.current.state === "closed") {
-      const context = new AudioContext();
+      // "playback" gives the browser a larger, more forgiving output buffer than
+      // the interactive default: a busy main thread (board animation, transcript
+      // flush) then cannot starve the audio thread into crackling.
+      let context: AudioContext;
+      try {
+        context = new AudioContext({ latencyHint: "playback" });
+      } catch {
+        context = new AudioContext();
+      }
       const gain = context.createGain();
       gain.connect(context.destination);
       audioContextRef.current = context;
       gainNodeRef.current = gain;
       nextAudioTimeRef.current = context.currentTime;
+      resampleStateRef.current = { sourceRate: 0, last: 0, phase: 0, primed: false };
     }
     const context = audioContextRef.current;
     if (context.state === "suspended") void context.resume();
@@ -1048,6 +1122,7 @@ export default function App() {
     activeSourcesRef.current.clear();
     setIsSpeaking(false);
     if (context) nextAudioTimeRef.current = context.currentTime;
+    resampleStateRef.current = { sourceRate: 0, last: 0, phase: 0, primed: false };
   }, []);
 
   const recentAudioHashesRef = useRef<string[]>([]);
@@ -1070,25 +1145,37 @@ export default function App() {
         const bytes = new Uint8Array(binary.length);
         for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
 
-        const { rate: sampleRate, channels } = parsePcmFormat(mimeType);
+        const { rate: sourceRate, channels } = parsePcmFormat(mimeType);
         const frameCount = Math.floor(bytes.byteLength / 2 / channels);
         if (!frameCount) return;
 
-        const audioBuffer = context.createBuffer(1, frameCount, sampleRate);
-        const channel = audioBuffer.getChannelData(0);
         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const mono = new Float32Array(frameCount);
         if (channels === 1) {
           for (let index = 0; index < frameCount; index += 1) {
-            channel[index] = view.getInt16(index * 2, true) / 32768;
+            mono[index] = view.getInt16(index * 2, true) / 32768;
           }
         } else {
           // Interleaved stereo: fold both channels down to mono.
           for (let index = 0; index < frameCount; index += 1) {
             const left = view.getInt16(index * channels * 2, true);
             const right = view.getInt16((index * channels + 1) * 2, true);
-            channel[index] = (left + right) / 2 / 32768;
+            mono[index] = (left + right) / 2 / 32768;
           }
         }
+        // Convert ONCE, continuously, to the context rate. Every buffer handed to
+        // WebAudio is then already at the output rate, so the browser never
+        // restarts a resampler at a packet boundary (the old source of clicks).
+        const samples = resamplePcm(
+          mono,
+          sourceRate,
+          context.sampleRate,
+          resampleStateRef.current,
+        );
+        if (!samples.length) return;
+        const audioBuffer = context.createBuffer(1, samples.length, context.sampleRate);
+        audioBuffer.getChannelData(0).set(samples);
+        const playbackRate = context.sampleRate;
         if (mimeType && !audioMimesSeenRef.current.has(mimeType)) {
           audioMimesSeenRef.current.add(mimeType);
           console.info("[maalam-audio] new packet format:", mimeType);
@@ -1099,10 +1186,11 @@ export default function App() {
           kind: "packet",
           mime: mimeType,
           bytes: bytes.byteLength,
-          rate: sampleRate,
+          rate: sourceRate,
           channels,
           state: context.state,
           ctxRate: context.sampleRate,
+          bufferedMs: Math.round((nextAudioTimeRef.current - context.currentTime) * 1000),
         });
 
         const source = context.createBufferSource();
@@ -1166,9 +1254,9 @@ export default function App() {
           // Playback restarts after silence: ramp the first ~8 ms in. The packet
           // may begin mid-word (a resumed answer, a code switch right at the cut),
           // and jumping straight to full amplitude clicks on top of the pause.
-          const restartFade = Math.min(Math.floor(sampleRate * 0.008), frameCount);
+          const restartFade = Math.min(Math.floor(playbackRate * 0.008), samples.length);
           for (let index = 0; index < restartFade; index += 1) {
-            channel[index] *= index / restartFade;
+            samples[index] *= index / restartFade;
           }
         } else {
           // Relax the learned prebuffer very slowly so one rough patch keeps
@@ -1522,7 +1610,10 @@ export default function App() {
           return;
         }
         pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "interrupted" });
-        stopAudio();
+        // Do NOT hard-cut the buffered tail: the server simply stopped sending.
+        // Let the ~jitter-buffer of already-scheduled speech play out while the
+        // continuation is generated — an abrupt stop mid-word is itself heard as
+        // the answer being chopped.
         cutReasonRef.current = "server";
         finishPendingAssistant(true);
         return;
@@ -2246,7 +2337,9 @@ export default function App() {
       sessionIsLectureRef.current = lectureActiveRef.current;
 
       ensureAudio();
-      stopAudio();
+      // Reconnecting to continue a cut answer keeps the already-buffered tail
+      // playing; any other (re)connect starts from a clean slate.
+      if (!resumeRef.current) stopAudio();
       finishPendingAssistant(true);
       freshTurnPendingRef.current = false;
       staleAudioUntilRef.current = 0;
@@ -2294,7 +2387,6 @@ export default function App() {
                 // the normal reconnect path (history is re-attached on connect).
                 pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "goaway" });
                 cutReasonRef.current = "transport";
-                stopAudio();
                 finishPendingAssistant(true);
                 setConnectionStatus("disconnected");
                 try {
@@ -2335,7 +2427,6 @@ export default function App() {
                 setError(event.message || "وقع مشكل فالاتصال بـ maalam Live.");
               }
               setConnectionStatus("disconnected");
-              stopAudio();
               cutReasonRef.current = "transport";
               finishPendingAssistant(true);
             },
@@ -2514,10 +2605,10 @@ export default function App() {
 
     ensureAudio();
     // Normal learner turns cut the old audio immediately. Automatic lecture
-    // segments keep the previous segment's buffered voice playing while the
-    // next response is generated, so the lecture does not click/silence at
-    // every turn boundary.
-    if (!options.preservePlayback) stopAudio();
+    // segments and automatic continuations keep the previous audio tail playing
+    // while the next response is generated, so the voice does not click/silence
+    // mid-answer at every turn boundary.
+    if (!options.preservePlayback && !options.resume) stopAudio();
     setError("");
 
     let referenceBlock = "";
@@ -2676,9 +2767,11 @@ export default function App() {
       turnSawServerActivityRef.current = false;
       lastClientSendAtRef.current = Date.now();
       resumeContinuationRef.current = Boolean(options.resume);
-      // Auto-continue segments keep the previous audio tail: only a short guard is
-      // needed there, so the new segment's first syllables are not clipped.
-      staleAudioUntilRef.current = Date.now() + (options.preservePlayback || options.resume ? 120 : 300);
+      // Auto-continue segments and automatic continuations have already received
+      // their previous turn's completion, so no stale packet can still be in
+      // flight: do not clip the first syllables of the new audio. Only a real
+      // learner barge-in needs a short guard against the cancelled answer's tail.
+      staleAudioUntilRef.current = options.preservePlayback || options.resume ? 0 : 300;
       sessionRef.current.sendClientContent({ turns: [{ role: "user", parts }], turnComplete: true });
       documentRemovedRef.current = false;
       return true;
