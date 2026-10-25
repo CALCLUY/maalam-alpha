@@ -2452,6 +2452,11 @@ export default function App() {
   const processToolCall = useCallback((toolCall: LiveServerToolCall) => {
     const calls = toolCall.functionCalls ?? [];
     if (!calls.length) return;
+    // The model often writes on the board before saying a word. Without a
+    // pending turn here, the reveal gate falls back to the PREVIOUS answer's
+    // transcript and can treat old words as if they had just been heard. Opening
+    // the turn first makes every write wait for this turn's own voice.
+    ensurePendingAssistant();
     turnToolsRef.current += calls.length;
     // A tool call is new-turn content: the cancelled answer cannot send audio
     // after it, so the short barge-in guard must not eat this answer's first
@@ -3035,7 +3040,7 @@ export default function App() {
       console.error("[maalam-live] tool response failed", err);
       pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "error" });
     }
-  }, [recentTranscript, audibleCharCount, commitBoardBlocks, eraseBoard, enqueueReveal, markZoneFull, boardFullResponse]);
+  }, [recentTranscript, audibleCharCount, commitBoardBlocks, ensurePendingAssistant, eraseBoard, enqueueReveal, markZoneFull, boardFullResponse]);
 
   const buildSystemInstruction = useCallback(() => {
     const lexicon = lexiconRef.current;
