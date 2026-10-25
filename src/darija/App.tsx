@@ -190,6 +190,19 @@ function appendTranscript(current: string, chunk: string): string {
   return current + chunk;
 }
 
+/**
+ * Continuation prompt for an answer that a socket hiccup / server cancel cut
+ * short. The tail anchors the model to the exact place it stopped, so it carries
+ * the explanation forward instead of restarting or apologising.
+ */
+function buildResumePrompt(content: string): string {
+  const tail = content.trim().slice(-700);
+  if (!tail) {
+    return "[VOX-DIRECTOR] Your previous answer was cut off by a technical hiccup before it could finish. Continue the answer from where it stopped, in Darija, as one continuous spoken explanation. Do not repeat what the learner already heard, do not restart from the beginning, do not apologise, and do not mention the interruption. [/VOX-DIRECTOR]";
+  }
+  return "[VOX-DIRECTOR] Your previous answer was cut off mid-sentence by a technical hiccup. Continue EXACTLY from where you stopped, in Darija, as one continuous spoken explanation. Do not repeat what the learner already heard, do not restart the answer, do not apologise, and do not mention the interruption. The last words the learner heard were:\n\"…" + tail + "\"\n[/VOX-DIRECTOR]";
+}
+
 const DOC_ACTIONS: { id: TutorAction; label: string; prompt: string }[] = [
   { id: "doc_lesson", label: "شرح ليا الدرس كامل", prompt: "شرح ليا الدرس ديال هاد الـ PDF كامل، نقطة بنقطة من اللول حتى نكملو كلشي." },
   {
@@ -210,10 +223,12 @@ const OUTPUT_SAMPLE_RATE = 24_000;
  *  turn how much more to prebuffer. */
 const AUDIO_LEAD_MIN = 0.5;
 const AUDIO_LEAD_MAX = 1.8;
-/** After a mid-turn stall, resume almost immediately: the learned lead is for
- *  the NEXT turn's start — waiting for it here stretched a 0.6 s pause into a
- *  much longer silent hole. */
+/** After a mid-turn stall, resume with a learned cushion: the pause that just
+ *  happened tells us how long code-switch / new-line generation gaps are, and
+ *  keeping that much audio buffered makes the NEXT one inaudible instead of
+ *  cutting the voice again. */
 const AUDIO_RESUME_LEAD = 0.25;
+const AUDIO_RESUME_LEAD_MAX = 0.6;
 /** How often streaming transcription may re-render the app while audio plays. */
 const TRANSCRIPT_FLUSH_MS = 80;
 /** If a turn goes completely silent this long, release it so the UI never locks. */
@@ -226,9 +241,18 @@ type SubmitTurnOptions = {
   hideUserMessage?: boolean;
   preservePlayback?: boolean;
   coverage?: boolean;
+  /** Continue an existing answer instead of opening a new bubble (auto-resume). */
+  appendTo?: string;
+  /** True for an automatic continuation, never for a learner turn. */
+  resume?: boolean;
 };
 
 const RESPONSE_WATCHDOG_MS = 25_000;
+/** A server-side cancel arriving this soon after our own send is the tail of the
+ *  answer the app itself just cut — it must never kill the new answer. */
+const INTERRUPT_TAIL_WINDOW_MS = 6_000;
+/** How many times a cut answer is continued automatically before giving up. */
+const RESUME_MAX_ATTEMPTS = 2;
 /** A lecture may overrun its clock only by this much while a segment is playing. */
 const LECTURE_HARD_STOP_GRACE_MS = 15_000;
 
@@ -904,6 +928,21 @@ export default function App() {
   /** True from sending a learner turn until its first server payload: a late
    *  interrupted/turnComplete from the cancelled previous turn is then stale. */
   const freshTurnPendingRef = useRef(false);
+  /** When the app last sent client content (used to recognise stale cancels). */
+  const lastClientSendAtRef = useRef(0);
+  /** Why the current answer was closed: only involuntary reasons are auto-resumed. */
+  const cutReasonRef = useRef<"" | "watchdog" | "transport" | "server">("");
+  /** An answer cut short, waiting to be continued into the same bubble. */
+  const resumeRef = useRef<{ messageId: string; content: string; attempts: number } | null>(null);
+  /** Resume attempts per assistant message, so a broken answer cannot loop. */
+  const resumeAttemptsRef = useRef<{ id: string; count: number }>({ id: "", count: 0 });
+  /** One automatic reconnect is allowed to get a pending resume out. */
+  const resumeReconnectRef = useRef(false);
+  const [resumePending, setResumePending] = useState(false);
+  /** Learned mid-turn playback cushion (seconds), grown on code-switch stalls. */
+  const resumeLeadRef = useRef(AUDIO_RESUME_LEAD);
+  /** The next first packet continues the answer that was just cut. */
+  const resumeContinuationRef = useRef(false);
   /** Short quiet window after a learner interjection: in-flight audio packets of
    *  the cancelled answer must never speak over the new question. */
   const staleAudioUntilRef = useRef(0);
@@ -1080,30 +1119,62 @@ export default function App() {
         let startAt = nextAudioTimeRef.current;
         if (startAt < now) {
           const stalledMidTurn = playbackActiveRef.current;
-          if (stalledMidTurn) {
+          const continuation = !stalledMidTurn && resumeContinuationRef.current;
+          if (!stalledMidTurn) resumeContinuationRef.current = false;
+          const gap = now - startAt;
+          // A few milliseconds of main-thread jitter (React render, board write)
+          // is NOT a generation stall. Inserting the resume cushion here used to
+          // turn every tiny scheduler delay into a quarter-second of silence —
+          // heard as the voice being chopped, especially at code-switch boundaries.
+          // Start immediately instead and keep the cushion for real stalls.
+          const jitter = stalledMidTurn && gap < 0.06;
+          if (stalledMidTurn && !jitter) {
             // Learn the stall size for the NEXT turn's prebuffer, but resume
             // quickly: waiting for the learned lead right here was itself heard
             // as a long cut.
-            const gap = now - startAt;
             leadRef.current = Math.min(
               AUDIO_LEAD_MAX,
               Math.max(leadRef.current * 1.2, gap + AUDIO_LEAD_MIN),
+            );
+            // Mid-turn, a cushion proportional (but capped) to the stall absorbs
+            // the generation pause of code switches / new lines: the next packet
+            // lands inside the cushion instead of starting a fresh silent hole.
+            resumeLeadRef.current = Math.min(
+              AUDIO_RESUME_LEAD_MAX,
+              Math.max(AUDIO_RESUME_LEAD, gap + 0.08, resumeLeadRef.current),
             );
             pushAudioLog(audioLogRef.current, {
               at: Date.now(),
               kind: "underrun",
               gapMs: Math.round(gap * 1000),
               leadMs: Math.round(leadRef.current * 1000),
-              resumeMs: Math.round(AUDIO_RESUME_LEAD * 1000),
+              resumeMs: Math.round(resumeLeadRef.current * 1000),
             });
           }
-          // Fresh turn: start with the learned prebuffer. Mid-turn stall: a
-          // small buffer only, so the pause stays short.
-          startAt = now + (stalledMidTurn ? AUDIO_RESUME_LEAD : leadRef.current);
+          // Fresh turn: start with the learned prebuffer. A continued answer that
+          // the socket cut uses the shorter mid-turn cushion instead: the voice is
+          // already mid-sentence, so a long empty lead reads as a new cut. Mid-turn
+          // stall: the adaptive resume cushion, so the pause stays short but future
+          // gaps in the same answer are absorbed. Jitter: start right away.
+          startAt = jitter
+            ? now + 0.005
+            : now + (stalledMidTurn
+              ? resumeLeadRef.current
+              : continuation
+                ? Math.max(AUDIO_RESUME_LEAD, resumeLeadRef.current)
+                : leadRef.current);
+          // Playback restarts after silence: ramp the first ~8 ms in. The packet
+          // may begin mid-word (a resumed answer, a code switch right at the cut),
+          // and jumping straight to full amplitude clicks on top of the pause.
+          const restartFade = Math.min(Math.floor(sampleRate * 0.008), frameCount);
+          for (let index = 0; index < restartFade; index += 1) {
+            channel[index] *= index / restartFade;
+          }
         } else {
           // Relax the learned prebuffer very slowly so one rough patch keeps
           // protecting later answers without adding latency forever.
           leadRef.current = Math.max(AUDIO_LEAD_MIN, leadRef.current * 0.999);
+          resumeLeadRef.current = Math.max(AUDIO_RESUME_LEAD, resumeLeadRef.current * 0.999);
         }
         playbackActiveRef.current = true;
         nextAudioTimeRef.current = startAt + audioBuffer.duration;
@@ -1314,11 +1385,41 @@ export default function App() {
     const id = pendingAssistantIdRef.current;
     const text = pendingAssistantTextRef.current.trim();
     const audioChunks = [...pendingAudioChunksRef.current];
+    const cutReason = cutReasonRef.current;
+    cutReasonRef.current = "";
+
+    // An INVOLUNTARY cut (watchdog, socket, server cancel) is continued
+    // automatically into the same bubble instead of asking the learner to re-ask.
+    // A cut the learner caused (new message, stop, erase) carries no reason.
+    let willResume = false;
+    if (id && interrupted && cutReason && !lectureActiveRef.current) {
+      const attempts = resumeAttemptsRef.current.id === id ? resumeAttemptsRef.current.count : 0;
+      if (attempts < RESUME_MAX_ATTEMPTS) {
+        willResume = true;
+        resumeAttemptsRef.current = { id, count: attempts + 1 };
+        resumeRef.current = { messageId: id, content: text, attempts: attempts + 1 };
+      }
+    }
+
     if (id) {
-      const status: MessageStatus = interrupted || (!text && !audioChunks.length) ? "interrupted" : "complete";
-      setMessages((current) => current.map((message) => message.id === id
-        ? { ...message, content: text, audioChunks, status }
-        : message));
+      const empty = !text && !audioChunks.length;
+      // An empty bubble teaches nothing: it is always hidden. A queued resume
+      // keeps it alive (as a thinking state); otherwise the speech nudge or the
+      // next turn fills the chat instead of a dead-end "الجواب تقطع" notice.
+      const dropEmpty = empty && !willResume;
+      const status: MessageStatus = willResume
+        ? "streaming"
+        : interrupted && cutReason
+          ? "interrupted"
+          : "complete";
+      setMessages((current) => {
+        const next = current
+          .filter((message) => !(dropEmpty && message.id === id))
+          .map((message) => (message.id === id
+            ? { ...message, content: text, audioChunks, status }
+            : message));
+        return next;
+      });
 
       if (!interrupted && text) {
         // Remember the spoken text so a board_write that arrives after turnComplete
@@ -1341,6 +1442,7 @@ export default function App() {
     pendingAssistantTextRef.current = "";
     pendingAudioChunksRef.current = [];
     setIsResponding(false);
+    setResumePending(willResume);
     if (lectureActiveRef.current) {
       // Only a turn where the server produced NOTHING AT ALL counts as a failed
       // continuation: a stall we cut ourselves (the server was alive but slow to
@@ -1376,6 +1478,7 @@ export default function App() {
           : "used board tools but produced ZERO speech — the student heard complete silence. Speak NOW in Darija: say what you just put on the board and why, 2-4 sentences, in ONE audio stretch.") +
         " Do not write anything else before speaking. [/VOX-DIRECTOR]";
       try {
+        lastClientSendAtRef.current = Date.now();
         sessionRef.current.sendClientContent({
           turns: [{ role: "user", parts: [{ text: nudge }] }],
           turnComplete: true,
@@ -1408,8 +1511,19 @@ export default function App() {
         // A cancel that lands before ANY payload of the new learner turn is the
         // tail of the previous generation the learner just interrupted.
         if (freshTurnPendingRef.current) return;
+        // The app has no microphone: EVERY server cancel is the tail of a turn
+        // the app itself cancelled when it sent new content. Such a tail can
+        // arrive late — after the new answer already started (or after its first
+        // board write) — and used to kill the fresh answer, which is exactly the
+        // "الجواب تقطع قبل ما يكمل" bubble. Only a cancel long after our own send
+        // is a real server-side cancellation.
+        if (Date.now() - lastClientSendAtRef.current < INTERRUPT_TAIL_WINDOW_MS) {
+          pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "interrupted" });
+          return;
+        }
         pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "interrupted" });
         stopAudio();
+        cutReasonRef.current = "server";
         finishPendingAssistant(true);
         return;
       }
@@ -1465,6 +1579,7 @@ export default function App() {
       if (!pendingAssistantIdRef.current) return;
       if (Date.now() - lastServerActivityRef.current < RESPONSE_WATCHDOG_MS) return;
       pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "watchdog" });
+      cutReasonRef.current = "watchdog";
       finishPendingAssistant(true);
     }, 2_000);
     return () => window.clearInterval(timer);
@@ -2178,6 +2293,7 @@ export default function App() {
                 // socket to die mid-sentence: end the turn and hand the learner
                 // the normal reconnect path (history is re-attached on connect).
                 pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "goaway" });
+                cutReasonRef.current = "transport";
                 stopAudio();
                 finishPendingAssistant(true);
                 setConnectionStatus("disconnected");
@@ -2191,9 +2307,10 @@ export default function App() {
               }
               try {
                 if (message.toolCall) {
-                  // A tool call is genuine activity of the live turn: the stale
-                  // cancel markers of the previous turn can no longer appear.
-                  freshTurnPendingRef.current = false;
+                  // Do NOT clear freshTurnPendingRef here: a stale cancel of the
+                  // previous turn can still arrive AFTER this first tool call
+                  // (the model often writes on the board before speaking), and it
+                  // must not kill an answer that has only written so far.
                   processToolCall(message.toolCall);
                   return;
                 }
@@ -2204,6 +2321,7 @@ export default function App() {
                 // turn, keep the socket, and let the learner continue.
                 console.error("[maalam-live] message handling failed", err);
                 pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "error" });
+                cutReasonRef.current = "transport";
                 finishPendingAssistant(true);
               }
             },
@@ -2218,6 +2336,7 @@ export default function App() {
               }
               setConnectionStatus("disconnected");
               stopAudio();
+              cutReasonRef.current = "transport";
               finishPendingAssistant(true);
             },
             onclose: (event) => {
@@ -2225,6 +2344,7 @@ export default function App() {
               connectionClosed = true;
               sessionRef.current = null;
               setConnectionStatus("disconnected");
+              cutReasonRef.current = "transport";
               finishPendingAssistant(true);
               if (event.code !== 1000 && !lectureActiveRef.current) {
                 setError(event.reason || "الجلسة تقطعات. عاود الاتصال باش تكمّل.");
@@ -2366,11 +2486,22 @@ export default function App() {
       return true;
     }
 
+    // A real learner turn cancels any queued automatic continuation: the learner
+    // asked something new, so the old answer must not resume on top of it.
+    if (!options.resume) {
+      resumeRef.current = null;
+      setResumePending(false);
+      resumeReconnectRef.current = false;
+    }
+
     // BARGE-IN: a learner message always wins. Close (and keep for replay) the
     // answer currently being spoken, cut its audio, then start the new turn.
     // Without this the composer silently ignored every question asked while the
     // tutor was talking — "he just continues explaining and ignores me".
     if (!options.preservePlayback && (pendingAssistantIdRef.current || isResponding)) {
+      // A learner-caused cut is not a failure: close it without a cut reason so
+      // finishPendingAssistant does not queue an automatic continuation.
+      if (!options.resume) cutReasonRef.current = "";
       finishPendingAssistant(true);
     }
 
@@ -2407,7 +2538,10 @@ export default function App() {
       document: options.document,
       image: options.image ? { name: options.image.name, previewUrl: options.image.previewUrl } : undefined,
     };
-    const assistantId = createId();
+    const appended = options.appendTo
+      ? messagesRef.current.find((message) => message.id === options.appendTo)
+      : undefined;
+    const assistantId = appended ? appended.id : createId();
     const assistantMessage: ChatMessage = {
       id: assistantId,
       role: "assistant",
@@ -2417,15 +2551,24 @@ export default function App() {
     };
 
     pendingAssistantIdRef.current = assistantId;
-    pendingAssistantTextRef.current = "";
-    pendingAudioChunksRef.current = [];
+    // When continuing an existing answer, seed the accumulated transcript and
+    // audio with what that bubble already holds so the replay stays complete.
+    pendingAssistantTextRef.current = appended ? appended.content : "";
+    pendingAudioChunksRef.current = appended ? [...(appended.audioChunks ?? [])] : [];
     speechStartRef.current = 0;
     scheduledDurationRef.current = 0;
-    setMessages((current) => [
-      ...current,
-      ...(options.hideUserMessage ? [{ ...userMessage, hidden: true }] : [userMessage]),
-      assistantMessage,
-    ]);
+    setMessages((current) => {
+      if (appended) {
+        return current.map((message) => (message.id === assistantId
+          ? { ...message, status: "streaming", refCount }
+          : message));
+      }
+      return [
+        ...current,
+        ...(options.hideUserMessage ? [{ ...userMessage, hidden: true }] : [userMessage]),
+        assistantMessage,
+      ];
+    });
     setIsResponding(true);
     lastServerActivityRef.current = Date.now();
 
@@ -2531,9 +2674,11 @@ export default function App() {
       }
       freshTurnPendingRef.current = true;
       turnSawServerActivityRef.current = false;
+      lastClientSendAtRef.current = Date.now();
+      resumeContinuationRef.current = Boolean(options.resume);
       // Auto-continue segments keep the previous audio tail: only a short guard is
       // needed there, so the new segment's first syllables are not clipped.
-      staleAudioUntilRef.current = Date.now() + (options.preservePlayback ? 120 : 300);
+      staleAudioUntilRef.current = Date.now() + (options.preservePlayback || options.resume ? 120 : 300);
       sessionRef.current.sendClientContent({ turns: [{ role: "user", parts }], turnComplete: true });
       documentRemovedRef.current = false;
       return true;
@@ -2548,6 +2693,42 @@ export default function App() {
   };
 
   /* ------------------------ Continuous lecture mode ---------------------- */
+  /**
+   * A cut the learner did NOT cause is continued into the same bubble. The model
+   * gets the tail of what it already said and is told to carry on from there, so
+   * the answer finishes instead of leaving a dead-end "الجواب تقطع" notice.
+   */
+  useEffect(() => {
+    if (!resumePending && !resumeRef.current) return;
+    const resume = resumeRef.current;
+    if (!resume) {
+      setResumePending(false);
+      return;
+    }
+    // The turn may have been cut BY the socket dying: rebuild it once so the
+    // continuation still gets out without the learner pressing reconnect.
+    if (connectionStatus !== "connected" || !sessionRef.current) {
+      if (!resumeReconnectRef.current && apiKey.trim()) {
+        resumeReconnectRef.current = true;
+        void connect(apiKey);
+      }
+      return;
+    }
+    resumeRef.current = null;
+    resumeReconnectRef.current = false;
+    setResumePending(false);
+    const sent = submitTurn(buildResumePrompt(resume.content), "message", {
+      hideUserMessage: true,
+      appendTo: resume.messageId,
+      resume: true,
+    });
+    if (!sent) {
+      // The session vanished between the check and the send. Leave the bubble as
+      // it is; the next learner turn reconnects through the normal path.
+      resumeRef.current = resume;
+    }
+  }, [apiKey, connect, connectionStatus, resumePending, submitTurn]);
+
   const showLectureNotice = useCallback((text: string) => {
     if (mediaNoticeTimerRef.current !== null) window.clearTimeout(mediaNoticeTimerRef.current);
     setMediaNotice(text);
