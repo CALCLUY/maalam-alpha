@@ -260,7 +260,7 @@ const LECTURE_HARD_STOP_GRACE_MS = 15_000;
  *  underruns). Readable as window.__maalamAudioLog while the app runs. */
 type AudioLogEntry = {
   at: number;
-  kind: "packet" | "duplicate" | "underrun" | "interrupted" | "turn-start" | "stop" | "format" | "goaway" | "watchdog" | "error";
+  kind: "packet" | "duplicate" | "underrun" | "interrupted" | "turn-start" | "stop" | "format" | "goaway" | "watchdog" | "worklet" | "error";
   mime?: string;
   bytes?: number;
   rate?: number;
@@ -348,6 +348,181 @@ function resamplePcm(
   state.last = input[input.length - 1] ?? state.last;
   return output;
 }
+
+/**
+ * Continuous PCM player. Live audio arrives in ~100 ms bursts on the main
+ * thread, but the learner must hear one uninterrupted voice. Scheduling a
+ * separate AudioBufferSourceNode per burst puts every seam at the mercy of the
+ * main thread (React renders, board handwriting, GC); this worklet keeps a ring
+ * buffer on the audio thread and consumes it sample by sample, so those pauses
+ * cannot punch a hole in the middle of a word. It also owns the fade in/out at
+ * a real underrun and reports how far it has actually played, which the board
+ * uses to stay behind the voice instead of ahead of it.
+ */
+const PCM_PLAYER_PROCESSOR = String.raw`
+class MaalamPcmPlayer extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    const opts = (options && options.processorOptions) || {};
+    this.capacity = Math.max(4096, Math.ceil(sampleRate * (opts.capacitySeconds || 30)));
+    this.ring = new Float32Array(this.capacity);
+    this.readIndex = 0;
+    this.writeIndex = 0;
+    this.size = 0;
+    this.playing = false;
+    this.priming = false;
+    this.playedOnce = false;
+    this.primeDeadline = 0;
+    this.fade = 0;
+    this.fadeStep = 1 / Math.max(1, Math.round(sampleRate * 0.008));
+    this.fadeSpan = Math.max(1, Math.round(sampleRate * 0.008));
+    this.startReserve = Math.round(sampleRate * (opts.startReserveSeconds || 0.9));
+    this.resumeReserve = Math.round(sampleRate * (opts.resumeReserveSeconds || 0.22));
+    this.startMaxWait = Math.round(sampleRate * (opts.startMaxWaitSeconds || 1.0));
+    this.resumeMaxWait = Math.round(sampleRate * (opts.resumeMaxWaitSeconds || 0.38));
+    this.lastReportFrame = 0;
+    this.played = 0;
+    this.underruns = 0;
+    this.dropped = 0;
+    this.stream = 0;
+    this.port.onmessage = (event) => this.onMessage(event.data);
+  }
+
+  onMessage(message) {
+    if (!message) return;
+    if (message.type === "push") {
+      const samples = message.samples;
+      if (!samples || !samples.length) return;
+      let offset = 0;
+      if (samples.length >= this.capacity) {
+        offset = samples.length - this.capacity;
+        this.dropped += samples.length - this.capacity;
+        this.readIndex = 0;
+        this.writeIndex = 0;
+        this.size = 0;
+      } else if (this.size + samples.length > this.capacity) {
+        const drop = this.size + samples.length - this.capacity;
+        this.readIndex = (this.readIndex + drop) % this.capacity;
+        this.size -= drop;
+        this.dropped += drop;
+      }
+      for (let index = offset; index < samples.length; index += 1) {
+        this.ring[this.writeIndex] = samples[index];
+        this.writeIndex = (this.writeIndex + 1) % this.capacity;
+        this.size += 1;
+      }
+      if (!this.playing && !this.priming) {
+        this.priming = true;
+        this.primeDeadline = currentFrame + (this.playedOnce ? this.resumeMaxWait : this.startMaxWait);
+      }
+      return;
+    }
+    if (message.type === "reset") {
+      this.readIndex = 0;
+      this.writeIndex = 0;
+      this.size = 0;
+      this.playing = false;
+      this.priming = false;
+      this.playedOnce = false;
+      this.primeDeadline = 0;
+      this.fade = 0;
+      this.played = 0;
+      this.underruns = 0;
+      this.dropped = 0;
+      this.stream = message.stream || 0;
+    }
+  }
+
+  process(inputs, outputs) {
+    const output = outputs[0] && outputs[0][0];
+    if (!output) return true;
+    output.fill(0);
+
+    if (!this.playing) {
+      if (this.size === 0) {
+        this.priming = false;
+        this.report();
+        return true;
+      }
+      if (!this.priming) {
+        this.priming = true;
+        this.primeDeadline = currentFrame + (this.playedOnce ? this.resumeMaxWait : this.startMaxWait);
+      }
+      const reserve = this.playedOnce ? this.resumeReserve : this.startReserve;
+      if (this.size < reserve && currentFrame < this.primeDeadline) {
+        this.report();
+        return true;
+      }
+      this.playing = true;
+      this.priming = false;
+      this.playedOnce = true;
+      this.fade = 0;
+    }
+
+    let index = 0;
+    while (index < output.length && this.size > 0) {
+      const sample = this.ring[this.readIndex];
+      this.readIndex = (this.readIndex + 1) % this.capacity;
+      this.size -= 1;
+      if (this.fade < 1) this.fade = Math.min(1, this.fade + this.fadeStep);
+      const tail = this.size < this.fadeSpan ? this.size / this.fadeSpan : 1;
+      output[index] = sample * this.fade * tail;
+      index += 1;
+      this.played += 1;
+    }
+
+    if (this.size === 0) {
+      // Both the fade above and this re-prime make a true generation stall a
+      // soft pause instead of a click; playback resumes as soon as enough new
+      // audio is queued, not after a fixed delay.
+      this.playing = false;
+      this.priming = false;
+      this.fade = 0;
+      this.underruns += 1;
+      this.port.postMessage({ type: "underrun", stream: this.stream, played: this.played });
+    }
+    this.report();
+    return true;
+  }
+
+  report() {
+    if (currentFrame - this.lastReportFrame < sampleRate * 0.05) return;
+    this.lastReportFrame = currentFrame;
+    this.port.postMessage({
+      type: "status",
+      stream: this.stream,
+      size: this.size,
+      playing: this.playing,
+      priming: this.priming,
+      played: this.played,
+      underruns: this.underruns,
+      dropped: this.dropped,
+    });
+  }
+}
+
+registerProcessor("maalam-pcm-player", MaalamPcmPlayer);
+`;
+
+type AudioTimelineEntry = {
+  /** Cumulative audio-stream position (seconds) after this packet was queued. */
+  audioEnd: number;
+  /** Transcript characters that correspond to that audio position. */
+  chars: number;
+};
+
+type PlayerStatusMessage =
+  | {
+    type: "status";
+    stream: number;
+    size: number;
+    playing: boolean;
+    priming: boolean;
+    played: number;
+    underruns: number;
+    dropped: number;
+  }
+  | { type: "underrun"; stream: number; played: number };
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected";
 type MessageStatus = "streaming" | "complete" | "interrupted";
@@ -1037,6 +1212,33 @@ export default function App() {
   const scheduledDurationRef = useRef(0);
   /** Timestamp of when the first audio chunk of the current turn started playing. */
   const speechStartRef = useRef(0);
+  /** Continuous worklet player (the primary output path). */
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const workletModeRef = useRef<"pending" | "worklet" | "legacy">("pending");
+  const workletInitStartedRef = useRef(false);
+  const pendingWorkletSamplesRef = useRef<Float32Array[]>([]);
+  /** Seconds actually rendered by the worklet since its last reset. */
+  const workletPlayedRef = useRef(0);
+  /** Seconds currently queued in the worklet. */
+  const workletQueuedRef = useRef(0);
+  const workletUnderrunsRef = useRef(0);
+  /** Epoch of the current audio stream; in-flight statuses from an older one
+   *  (before a barge-in reset) must not mark new text as already heard. */
+  const workletStreamRef = useRef(0);
+  /** True while audio is playing or waiting to resume (drives reveal pacing). */
+  const audioPlayingRef = useRef(false);
+  /** Safety deadline for that flag: reveals may never wait on a stuck player. */
+  const audioEndsAtRef = useRef(0);
+  /** Cumulative seconds of audio posted/scheduled since the last hard stop. */
+  const postedAudioRef = useRef(0);
+  /** Audio-stream position at which the current turn's transcript begins. */
+  const turnAudioStartRef = useRef(0);
+  /** Audio position → transcript length, so text never runs ahead of the voice. */
+  const audioTimelineRef = useRef<AudioTimelineEntry[]>([{ audioEnd: 0, chars: 0 }]);
+  /** Transcript length reached by the last posted audio packet. */
+  const lastAudioCharsRef = useRef(0);
+  /** Context time at which the legacy fallback stream started. */
+  const legacyStreamStartRef = useRef(0);
 
   /* ---------------------------- DODa loading ---------------------------- */
   useEffect(() => {
@@ -1073,6 +1275,176 @@ export default function App() {
   }, []);
 
   /* ------------------------------- Audio -------------------------------- */
+  /** Fallback path: one AudioBufferSourceNode per packet, gaplessly scheduled.
+   *  Used only when AudioWorklet is unavailable (old Safari, strict CSP, file://). */
+  const scheduleLegacySamples = useCallback((samples: Float32Array, context: AudioContext) => {
+    if (!samples.length) return;
+    const audioBuffer = context.createBuffer(1, samples.length, context.sampleRate);
+    audioBuffer.getChannelData(0).set(samples);
+    const source = context.createBufferSource();
+    source.buffer = audioBuffer;
+    source.playbackRate.value = 1;
+    source.connect(gainNodeRef.current!);
+    // Gapless streaming scheduler with an adaptive jitter buffer. While the
+    // packets keep up, each chunk joins the previous one exactly. When the
+    // playhead has overtaken the cursor, the buffer is rebuilt to the size of
+    // the ACTUAL stall: a language switch (Arabic → French) can pause
+    // generation for several hundred ms.
+    const now = context.currentTime;
+    let startAt = nextAudioTimeRef.current;
+    if (startAt < now) {
+      const stalledMidTurn = playbackActiveRef.current;
+      const continuation = !stalledMidTurn && resumeContinuationRef.current;
+      if (!stalledMidTurn) resumeContinuationRef.current = false;
+      const gap = now - startAt;
+      // A few milliseconds of main-thread jitter (React render, board write)
+      // is NOT a generation stall. Inserting the resume cushion here used to
+      // turn every tiny scheduler delay into a quarter-second of silence —
+      // heard as the voice being chopped, especially at code-switch boundaries.
+      const jitter = stalledMidTurn && gap < 0.06;
+      if (stalledMidTurn && !jitter) {
+        leadRef.current = Math.min(
+          AUDIO_LEAD_MAX,
+          Math.max(leadRef.current * 1.2, gap + AUDIO_LEAD_MIN),
+        );
+        resumeLeadRef.current = Math.min(
+          AUDIO_RESUME_LEAD_MAX,
+          Math.max(AUDIO_RESUME_LEAD, gap + 0.08, resumeLeadRef.current),
+        );
+        pushAudioLog(audioLogRef.current, {
+          at: Date.now(),
+          kind: "underrun",
+          gapMs: Math.round(gap * 1000),
+          leadMs: Math.round(leadRef.current * 1000),
+          resumeMs: Math.round(resumeLeadRef.current * 1000),
+        });
+      }
+      startAt = jitter
+        ? now + 0.005
+        : now + (stalledMidTurn
+          ? resumeLeadRef.current
+          : continuation
+            ? Math.max(AUDIO_RESUME_LEAD, resumeLeadRef.current)
+            : leadRef.current);
+      // Playback restarts after silence: ramp the first ~8 ms in.
+      const restartFade = Math.min(Math.floor(context.sampleRate * 0.008), samples.length);
+      for (let index = 0; index < restartFade; index += 1) {
+        samples[index] *= index / restartFade;
+      }
+    } else {
+      leadRef.current = Math.max(AUDIO_LEAD_MIN, leadRef.current * 0.999);
+      resumeLeadRef.current = Math.max(AUDIO_RESUME_LEAD, resumeLeadRef.current * 0.999);
+    }
+    playbackActiveRef.current = true;
+    audioPlayingRef.current = true;
+    audioEndsAtRef.current = Date.now() + Math.max(0, startAt + audioBuffer.duration - now) * 1000 + 1200;
+    nextAudioTimeRef.current = startAt + audioBuffer.duration;
+    if (legacyStreamStartRef.current === 0) legacyStreamStartRef.current = startAt;
+    activeSourcesRef.current.add(source);
+    setIsSpeaking(true);
+    if (speechStartRef.current === 0) {
+      speechStartRef.current = Date.now() + Math.max(0, (startAt - now) * 1000);
+    }
+    scheduledDurationRef.current += audioBuffer.duration;
+    source.onended = () => {
+      activeSourcesRef.current.delete(source);
+      if (activeSourcesRef.current.size === 0) {
+        setIsSpeaking(false);
+        audioPlayingRef.current = false;
+      }
+    };
+    source.start(startAt);
+  }, []);
+
+  const flushPendingWorkletSamples = useCallback((node: AudioWorkletNode) => {
+    const pending = pendingWorkletSamplesRef.current;
+    pendingWorkletSamplesRef.current = [];
+    for (const samples of pending) {
+      node.port.postMessage({ type: "push", samples }, [samples.buffer]);
+    }
+  }, []);
+
+  const fallbackToLegacy = useCallback((context: AudioContext) => {
+    if (workletModeRef.current === "legacy") return;
+    workletModeRef.current = "legacy";
+    workletNodeRef.current = null;
+    pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "worklet", state: "fallback" });
+    const pending = pendingWorkletSamplesRef.current;
+    pendingWorkletSamplesRef.current = [];
+    pending.forEach((samples) => scheduleLegacySamples(samples, context));
+  }, [scheduleLegacySamples]);
+
+  const initWorklet = useCallback((context: AudioContext) => {
+    if (workletInitStartedRef.current) return;
+    workletInitStartedRef.current = true;
+    if (!context.audioWorklet || typeof AudioWorkletNode === "undefined") {
+      fallbackToLegacy(context);
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([PCM_PLAYER_PROCESSOR], { type: "text/javascript" }));
+    context.audioWorklet.addModule(url).then(() => {
+      URL.revokeObjectURL(url);
+      if (audioContextRef.current !== context || !gainNodeRef.current) return;
+      const node = new AudioWorkletNode(context, "maalam-pcm-player", {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+      });
+      node.connect(gainNodeRef.current);
+      node.port.onmessage = (event: MessageEvent<PlayerStatusMessage>) => {
+        const message = event.data;
+        if (!message) return;
+        // A message can still be in flight when the stream was reset: putting
+        // its old play position into the new stream would make the board think
+        // the whole new answer had already been heard.
+        if (message.stream !== workletStreamRef.current) return;
+        if (message.type === "underrun") {
+          pushAudioLog(audioLogRef.current, {
+            at: Date.now(),
+            kind: "underrun",
+            gapMs: 0,
+            leadMs: Math.round(workletQueuedRef.current * 1000),
+            resumeMs: Math.round(workletQueuedRef.current * 1000),
+          });
+          return;
+        }
+        if (message.type !== "status") return;
+        const active = message.playing || message.size > 0;
+        workletQueuedRef.current = message.size / context.sampleRate;
+        // A status from before a reset can still be in flight: never let the
+        // old stream's play position leak into the new one.
+        workletPlayedRef.current = Math.min(
+          postedAudioRef.current,
+          message.played / context.sampleRate,
+        );
+        audioPlayingRef.current = active;
+        audioEndsAtRef.current = active
+          ? Date.now() + workletQueuedRef.current * 1000 + 1200
+          : 0;
+        setIsSpeaking((current) => (current === active ? current : active));
+        if (message.underruns > workletUnderrunsRef.current) {
+          workletUnderrunsRef.current = message.underruns;
+        }
+      };
+      workletNodeRef.current = node;
+      workletModeRef.current = "worklet";
+      pushAudioLog(audioLogRef.current, {
+        at: Date.now(),
+        kind: "worklet",
+        state: "ready",
+        ctxRate: context.sampleRate,
+      });
+      // The module may finish loading after a barge-in already advanced the
+      // epoch: align the fresh processor before handing it the held packets.
+      node.port.postMessage({ type: "reset", stream: workletStreamRef.current });
+      flushPendingWorkletSamples(node);
+    }).catch(() => {
+      URL.revokeObjectURL(url);
+      if (audioContextRef.current !== context) return;
+      fallbackToLegacy(context);
+    });
+  }, [fallbackToLegacy, flushPendingWorkletSamples]);
+
   const ensureAudio = useCallback(() => {
     if (!audioContextRef.current || audioContextRef.current.state === "closed") {
       // "playback" gives the browser a larger, more forgiving output buffer than
@@ -1090,15 +1462,22 @@ export default function App() {
       gainNodeRef.current = gain;
       nextAudioTimeRef.current = context.currentTime;
       resampleStateRef.current = { sourceRate: 0, last: 0, phase: 0, primed: false };
+      workletNodeRef.current = null;
+      workletModeRef.current = "pending";
+      workletInitStartedRef.current = false;
+      pendingWorkletSamplesRef.current = [];
     }
     const context = audioContextRef.current;
     if (context.state === "suspended") void context.resume();
+    initWorklet(context);
     return context;
-  }, []);
+  }, [initWorklet]);
 
   const stopAudio = useCallback(() => {
     pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "stop" });
     playbackActiveRef.current = false;
+    audioPlayingRef.current = false;
+    audioEndsAtRef.current = 0;
     const context = audioContextRef.current;
     const gain = gainNodeRef.current;
     // Click-free cut: dip the master gain over ~20 ms and stop the sources at
@@ -1111,6 +1490,21 @@ export default function App() {
       gain.gain.linearRampToValueAtTime(0.0001, stopAt);
       gain.gain.setValueAtTime(1, stopAt + 0.005);
     }
+    // The worklet clears its whole queue at once; the master fade above is what
+    // makes that cut inaudible. It must not run its own stop fade, otherwise
+    // replaying/starting the next answer would be swallowed by the fade.
+    workletStreamRef.current += 1;
+    if (workletNodeRef.current) {
+      try {
+        workletNodeRef.current.port.postMessage({
+          type: "reset",
+          stream: workletStreamRef.current,
+        });
+      } catch {
+        // Node already gone.
+      }
+    }
+    pendingWorkletSamplesRef.current = [];
     activeSourcesRef.current.forEach((source) => {
       source.onended = null;
       try {
@@ -1123,6 +1517,16 @@ export default function App() {
     setIsSpeaking(false);
     if (context) nextAudioTimeRef.current = context.currentTime;
     resampleStateRef.current = { sourceRate: 0, last: 0, phase: 0, primed: false };
+    postedAudioRef.current = 0;
+    turnAudioStartRef.current = 0;
+    audioTimelineRef.current = [{ audioEnd: 0, chars: 0 }];
+    lastAudioCharsRef.current = 0;
+    workletPlayedRef.current = 0;
+    workletQueuedRef.current = 0;
+    workletUnderrunsRef.current = 0;
+    legacyStreamStartRef.current = 0;
+    scheduledDurationRef.current = 0;
+    speechStartRef.current = 0;
   }, []);
 
   const recentAudioHashesRef = useRef<string[]>([]);
@@ -1163,9 +1567,8 @@ export default function App() {
             mono[index] = (left + right) / 2 / 32768;
           }
         }
-        // Convert ONCE, continuously, to the context rate. Every buffer handed to
-        // WebAudio is then already at the output rate, so the browser never
-        // restarts a resampler at a packet boundary (the old source of clicks).
+        // Convert ONCE, continuously, to the context rate. Every packet joins the
+        // same stream with no per-buffer resampler restart at the seam.
         const samples = resamplePcm(
           mono,
           sourceRate,
@@ -1173,14 +1576,27 @@ export default function App() {
           resampleStateRef.current,
         );
         if (!samples.length) return;
-        const audioBuffer = context.createBuffer(1, samples.length, context.sampleRate);
-        audioBuffer.getChannelData(0).set(samples);
-        const playbackRate = context.sampleRate;
+        const duration = samples.length / context.sampleRate;
         if (mimeType && !audioMimesSeenRef.current.has(mimeType)) {
           audioMimesSeenRef.current.add(mimeType);
           console.info("[maalam-audio] new packet format:", mimeType);
           pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "format", mime: mimeType });
         }
+
+        // The audio stream and the transcript are generated at the same pace,
+        // but transcription arrives on the main thread before the learner hears
+        // the matching audio (the worklet can be ~1 s ahead). Record where each
+        // packet ends in the stream so the board can reveal a line only once the
+        // voice has actually reached it.
+        postedAudioRef.current += duration;
+        scheduledDurationRef.current += duration;
+        lastAudioCharsRef.current = pendingAssistantTextRef.current.length;
+        const timeline = audioTimelineRef.current;
+        timeline.push({ audioEnd: postedAudioRef.current, chars: lastAudioCharsRef.current });
+        if (timeline.length > 900) timeline.splice(0, timeline.length - 900);
+        if (speechStartRef.current === 0) speechStartRef.current = Date.now();
+
+        const mode = workletModeRef.current;
         pushAudioLog(audioLogRef.current, {
           at: Date.now(),
           kind: "packet",
@@ -1190,101 +1606,35 @@ export default function App() {
           channels,
           state: context.state,
           ctxRate: context.sampleRate,
-          bufferedMs: Math.round((nextAudioTimeRef.current - context.currentTime) * 1000),
+          bufferedMs: Math.round(
+            (mode === "worklet"
+              ? workletQueuedRef.current
+              : Math.max(0, nextAudioTimeRef.current - context.currentTime)) * 1000,
+          ),
         });
 
-        const source = context.createBufferSource();
-        source.buffer = audioBuffer;
-        source.playbackRate.value = 1;
-        source.connect(gainNodeRef.current!);
-        // Gapless streaming scheduler with an adaptive jitter buffer. While the
-        // packets keep up, each chunk joins the previous one exactly. When the
-        // playhead has overtaken the cursor, the buffer is rebuilt to the size
-        // of the ACTUAL stall: a language switch (Arabic → French) can pause
-        // generation for several hundred ms, and learning that pause size is
-        // what lets the next one be absorbed instead of cutting the voice.
-        const now = context.currentTime;
-        let startAt = nextAudioTimeRef.current;
-        if (startAt < now) {
-          const stalledMidTurn = playbackActiveRef.current;
-          const continuation = !stalledMidTurn && resumeContinuationRef.current;
-          if (!stalledMidTurn) resumeContinuationRef.current = false;
-          const gap = now - startAt;
-          // A few milliseconds of main-thread jitter (React render, board write)
-          // is NOT a generation stall. Inserting the resume cushion here used to
-          // turn every tiny scheduler delay into a quarter-second of silence —
-          // heard as the voice being chopped, especially at code-switch boundaries.
-          // Start immediately instead and keep the cushion for real stalls.
-          const jitter = stalledMidTurn && gap < 0.06;
-          if (stalledMidTurn && !jitter) {
-            // Learn the stall size for the NEXT turn's prebuffer, but resume
-            // quickly: waiting for the learned lead right here was itself heard
-            // as a long cut.
-            leadRef.current = Math.min(
-              AUDIO_LEAD_MAX,
-              Math.max(leadRef.current * 1.2, gap + AUDIO_LEAD_MIN),
-            );
-            // Mid-turn, a cushion proportional (but capped) to the stall absorbs
-            // the generation pause of code switches / new lines: the next packet
-            // lands inside the cushion instead of starting a fresh silent hole.
-            resumeLeadRef.current = Math.min(
-              AUDIO_RESUME_LEAD_MAX,
-              Math.max(AUDIO_RESUME_LEAD, gap + 0.08, resumeLeadRef.current),
-            );
-            pushAudioLog(audioLogRef.current, {
-              at: Date.now(),
-              kind: "underrun",
-              gapMs: Math.round(gap * 1000),
-              leadMs: Math.round(leadRef.current * 1000),
-              resumeMs: Math.round(resumeLeadRef.current * 1000),
-            });
-          }
-          // Fresh turn: start with the learned prebuffer. A continued answer that
-          // the socket cut uses the shorter mid-turn cushion instead: the voice is
-          // already mid-sentence, so a long empty lead reads as a new cut. Mid-turn
-          // stall: the adaptive resume cushion, so the pause stays short but future
-          // gaps in the same answer are absorbed. Jitter: start right away.
-          startAt = jitter
-            ? now + 0.005
-            : now + (stalledMidTurn
-              ? resumeLeadRef.current
-              : continuation
-                ? Math.max(AUDIO_RESUME_LEAD, resumeLeadRef.current)
-                : leadRef.current);
-          // Playback restarts after silence: ramp the first ~8 ms in. The packet
-          // may begin mid-word (a resumed answer, a code switch right at the cut),
-          // and jumping straight to full amplitude clicks on top of the pause.
-          const restartFade = Math.min(Math.floor(playbackRate * 0.008), samples.length);
-          for (let index = 0; index < restartFade; index += 1) {
-            samples[index] *= index / restartFade;
-          }
-        } else {
-          // Relax the learned prebuffer very slowly so one rough patch keeps
-          // protecting later answers without adding latency forever.
-          leadRef.current = Math.max(AUDIO_LEAD_MIN, leadRef.current * 0.999);
-          resumeLeadRef.current = Math.max(AUDIO_RESUME_LEAD, resumeLeadRef.current * 0.999);
+        if (mode === "worklet" && workletNodeRef.current) {
+          workletNodeRef.current.port.postMessage({ type: "push", samples }, [samples.buffer]);
+          audioPlayingRef.current = true;
+          setIsSpeaking(true);
+          return;
         }
-        playbackActiveRef.current = true;
-        nextAudioTimeRef.current = startAt + audioBuffer.duration;
-        activeSourcesRef.current.add(source);
-        setIsSpeaking(true);
-        if (speechStartRef.current === 0) {
-          // Playback actually begins at `startAt`, which can be up to the jitter
-          // buffer later than now: board pacing must follow the real audio, not
-          // the arrival of the first packet.
-          speechStartRef.current = Date.now() + Math.max(0, (startAt - now) * 1000);
+        if (mode === "pending") {
+          // The worklet module is still loading (a few milliseconds): hold the
+          // first packets instead of playing them through a second engine, which
+          // would double the voice at the hand-off.
+          pendingWorkletSamplesRef.current.push(samples);
+          audioPlayingRef.current = true;
+          audioEndsAtRef.current = Date.now() + 2500;
+          setIsSpeaking(true);
+          return;
         }
-        scheduledDurationRef.current += audioBuffer.duration;
-        source.onended = () => {
-          activeSourcesRef.current.delete(source);
-          if (activeSourcesRef.current.size === 0) setIsSpeaking(false);
-        };
-        source.start(startAt);
+        scheduleLegacySamples(samples, context);
       } catch {
         setError("ما قدرناش نشغّلو الصوت فهاد المتصفح.");
       }
     },
-    [ensureAudio],
+    [ensureAudio, scheduleLegacySamples],
   );
 
   /** Transcription arrives with every audio packet. Re-rendering the whole app
@@ -1317,11 +1667,61 @@ export default function App() {
     return id;
   }, []);
 
-  /** The transcript currently being spoken, or the last one if the turn already finished. */
-  const recentTranscript = useCallback(() => {
-    const pending = pendingAssistantTextRef.current.trim();
-    return pending || lastTranscriptRef.current;
+  /**
+   * How many seconds of the current audio stream the output device has actually
+   * rendered. The worklet counts rendered samples rather than wall-clock time,
+   * so a stalled generation cannot make the board believe unheard text was
+   * already spoken.
+   */
+  const audioPlayedSeconds = useCallback(() => {
+    if (workletModeRef.current === "worklet") {
+      return Math.min(postedAudioRef.current, workletPlayedRef.current);
+    }
+    if (workletModeRef.current === "legacy") {
+      const context = audioContextRef.current;
+      if (!context || legacyStreamStartRef.current === 0) return 0;
+      return Math.min(
+        postedAudioRef.current,
+        Math.max(0, context.currentTime - legacyStreamStartRef.current),
+      );
+    }
+    return 0;
   }, []);
+
+  /** Transcript length that has actually reached the learner's ears. */
+  const audibleCharCount = useCallback(() => {
+    const timeline = audioTimelineRef.current;
+    if (!timeline.length) return 0;
+    const start = turnAudioStartRef.current;
+    const heard = Math.max(start, audioPlayedSeconds());
+    let previous = timeline[0];
+    if (heard <= previous.audioEnd) return previous.chars;
+    for (let index = 1; index < timeline.length; index += 1) {
+      const entry = timeline[index];
+      if (entry.audioEnd <= previous.audioEnd) {
+        previous = entry;
+        continue;
+      }
+      if (heard <= entry.audioEnd) {
+        const span = entry.audioEnd - previous.audioEnd;
+        const fraction = Math.min(1, Math.max(0, (heard - previous.audioEnd) / span));
+        return Math.round(previous.chars + (entry.chars - previous.chars) * fraction);
+      }
+      previous = entry;
+    }
+    return previous.chars;
+  }, [audioPlayedSeconds]);
+
+  /** The transcript currently being spoken, or the last one if the turn already
+   *  finished — always cut at the point the voice has actually reached. The
+   *  transcript arrives about a jitter-buffer ahead of the audio, so using it
+   *  raw is what made board lines appear before the tutor read them. */
+  const recentTranscript = useCallback(() => {
+    const pending = pendingAssistantTextRef.current;
+    const source = pending || lastTranscriptRef.current;
+    const heard = audibleCharCount();
+    return source.slice(0, Math.min(source.length, Math.max(0, heard)));
+  }, [audibleCharCount]);
 
   /**
    * Releases queued examples once they are actually spoken.
@@ -1352,7 +1752,7 @@ export default function App() {
           // reveal queue for a long stretch, and the board treats blocks older than
           // a few seconds as already-written (they would pop in with no animation).
           commitBoardBlocks(insertPreparedBlock(boardBlocksRef.current, { ...prepared.block, createdAt: Date.now() }));
-          lastRevealRef.current = { at: Date.now(), transcriptLen: pendingAssistantTextRef.current.length };
+          lastRevealRef.current = { at: Date.now(), transcriptLen: audibleCharCount() };
         } else if (prepared.status === "full") {
           zoneFullRef.current(prepared.zone);
         }
@@ -1361,7 +1761,7 @@ export default function App() {
       }
     }
     pendingExamplesRef.current = keep;
-  }, [recentTranscript, commitBoardBlocks]);
+  }, [recentTranscript, commitBoardBlocks, audibleCharCount]);
 
   /**
    * Speech-synced reveal pacing: tool calls arrive in a burst at the start of a
@@ -1389,22 +1789,23 @@ export default function App() {
     // Refresh the timestamp at commit time so the block always plays its
     // handwriting animation (see flushSpokenExamples).
     commitBoardBlocks(insertPreparedBlock(boardBlocksRef.current, { ...next.block, createdAt: Date.now() }));
-    lastRevealRef.current = { at: Date.now(), transcriptLen: pendingAssistantTextRef.current.length };
+    lastRevealRef.current = { at: Date.now(), transcriptLen: audibleCharCount() };
     return true;
-  }, [commitBoardBlocks]);
+  }, [commitBoardBlocks, audibleCharCount]);
 
   const maybeRevealQueuedBlocks = useCallback(() => {
     const head = pendingRevealsRef.current[0];
     if (!head) return;
-    if (!pendingAssistantIdRef.current) return;
+    // Reveals may continue after turnComplete while the buffered voice is still
+    // finishing the answer; that tail is exactly where the late lines belong.
+    if (!pendingAssistantIdRef.current && !audioPlayingRef.current) return;
     const now = Date.now();
     // Minimum gap between reveals lets the handwriting animation play.
     if (now - lastRevealRef.current.at < REVEAL_MIN_INTERVAL_MS) return;
 
-    // 1. SPEECH SYNC: the line whose own words are being said right now is
-    //    written right now. The board can never run ahead of the voice here,
-    //    and the line lands while it is being spoken instead of seconds before
-    //    or after — which is what made writing feel out of sync with speech.
+    // 1. SPEECH SYNC: the line whose own words are being heard right now is
+    //    written right now. `recentTranscript` is cut at the played audio, so
+    //    the board cannot run ahead of the voice by the jitter buffer.
     if (blockMentionedInSpeech(head.block, recentTranscript())) {
       revealNextBlock();
       return;
@@ -1412,8 +1813,8 @@ export default function App() {
 
     // 2. FALLBACK for lines that cannot be matched word-for-word (formulas,
     //    diagrams, condensed notes): the voice must have clearly moved on — a
-    //    real stretch of new speech — before such a line lands.
-    const spokenSinceReveal = pendingAssistantTextRef.current.length - lastRevealRef.current.transcriptLen;
+    //    real stretch of newly heard speech — before such a line lands.
+    const spokenSinceReveal = Math.max(0, audibleCharCount() - lastRevealRef.current.transcriptLen);
     if (spokenSinceReveal >= REVEAL_FALLBACK_TEXT) {
       revealNextBlock();
       return;
@@ -1425,18 +1826,26 @@ export default function App() {
     if (now - head.queuedAt >= REVEAL_MAX_WAIT_MS && now - lastRevealRef.current.at >= REVEAL_MAX_WAIT_MS) {
       revealNextBlock();
     }
-  }, [revealNextBlock, recentTranscript]);
+  }, [revealNextBlock, recentTranscript, audibleCharCount]);
 
   const flushRevealQueue = useCallback(() => {
-    // Turn is over: drain leftovers at the same paced rhythm instead of dumping
-    // them all at once — the instant dump is how an example + a question + an
-    // explanation landed on the board at the same instant.
+    // Turn is over, but the voice is not: wait for the buffered tail to finish
+    // before draining leftovers. Revealing lines while the learner still hears
+    // the previous idea is the "reading a word before it reaches it" mismatch.
+    const startedAt = Date.now();
     const drain = () => {
       if (!pendingRevealsRef.current.length) return;
       // A new turn started meanwhile: normal speech-paced revealing takes over.
       if (pendingAssistantIdRef.current) return;
+      const stillAudible = audioPlayingRef.current
+        && Date.now() < audioEndsAtRef.current
+        && Date.now() - startedAt < 90_000;
+      if (stillAudible) {
+        window.setTimeout(drain, 700);
+        return;
+      }
       revealNextBlock();
-      window.setTimeout(drain, 1300);
+      window.setTimeout(drain, 900);
     };
     window.setTimeout(drain, 500);
   }, [revealNextBlock]);
@@ -1453,16 +1862,17 @@ export default function App() {
   }, []);
 
   // Fallback ticker for the reveal gate: the gate is re-evaluated whenever the
-  // transcript grows, and this timer keeps the time-based fallbacks moving even
-  // when transcription is quiet. Same tick as the reveal floor so a line can be
-  // written the moment the voice has moved on.
+  // transcript grows, and this timer keeps it moving while the voice is still
+  // playing (including after turnComplete, when the buffered tail is the only
+  // thing left). It also releases examples whose spoken words have been heard.
   useEffect(() => {
-    if (!isResponding) return;
+    if (!isResponding && !isSpeaking) return;
     const timer = window.setInterval(() => {
+      flushSpokenExamples();
       maybeRevealQueuedBlocks();
-    }, 1200);
+    }, 700);
     return () => window.clearInterval(timer);
-  }, [isResponding, maybeRevealQueuedBlocks]);
+  }, [isResponding, isSpeaking, flushSpokenExamples, maybeRevealQueuedBlocks]);
 
   const finishPendingAssistant = useCallback((interrupted = false) => {
     // A queued throttled flush must never write stale text into a closed message.
@@ -1471,10 +1881,20 @@ export default function App() {
       transcriptFlushTimerRef.current = null;
     }
     const id = pendingAssistantIdRef.current;
-    const text = pendingAssistantTextRef.current.trim();
+    const rawText = pendingAssistantTextRef.current;
+    const text = rawText.trim();
     const audioChunks = [...pendingAudioChunksRef.current];
     const cutReason = cutReasonRef.current;
     cutReasonRef.current = "";
+
+    // Transcription runs ahead of the voice (the jitter buffer is deliberately
+    // large). Resuming from the RAW transcript tail therefore skips words whose
+    // audio was never heard — the "it reads a word before it reaches it" cut.
+    // Anchor the continuation to the last packet that was actually posted for
+    // playback; everything up to there will have been heard when the buffered
+    // tail finishes.
+    const heardChars = Math.min(rawText.length, Math.max(0, lastAudioCharsRef.current));
+    const heardText = rawText.slice(0, heardChars).trim();
 
     // An INVOLUNTARY cut (watchdog, socket, server cancel) is continued
     // automatically into the same bubble instead of asking the learner to re-ask.
@@ -1485,7 +1905,11 @@ export default function App() {
       if (attempts < RESUME_MAX_ATTEMPTS) {
         willResume = true;
         resumeAttemptsRef.current = { id, count: attempts + 1 };
-        resumeRef.current = { messageId: id, content: text, attempts: attempts + 1 };
+        resumeRef.current = {
+          messageId: id,
+          content: heardText || text,
+          attempts: attempts + 1,
+        };
       }
     }
 
@@ -1509,10 +1933,13 @@ export default function App() {
         return next;
       });
 
-      if (!interrupted && text) {
-        // Remember the spoken text so a board_write that arrives after turnComplete
-        // can still be matched against what was actually said.
+      if (text) {
+        // Remember the text so a board_write that arrives after turnComplete (or
+        // while an interrupted answer's buffered tail is still playing) can be
+        // matched against what was actually said.
         lastTranscriptRef.current = text;
+      }
+      if (!interrupted && text) {
         flushSpokenExamples();
         // Turn over: reveal anything still waiting so no content is lost.
         flushRevealQueue();
@@ -1597,8 +2024,13 @@ export default function App() {
           return;
         }
         // A cancel that lands before ANY payload of the new learner turn is the
-        // tail of the previous generation the learner just interrupted.
-        if (freshTurnPendingRef.current) return;
+        // tail of the previous generation the learner just interrupted. That
+        // marker also means every later audio packet belongs to the NEW answer,
+        // so stop dropping its first syllables.
+        if (freshTurnPendingRef.current) {
+          staleAudioUntilRef.current = 0;
+          return;
+        }
         // The app has no microphone: EVERY server cancel is the tail of a turn
         // the app itself cancelled when it sent new content. Such a tail can
         // arrive late — after the new answer already started (or after its first
@@ -1623,7 +2055,10 @@ export default function App() {
         // Same race: the server may still send turnComplete for the cancelled
         // turn. Ignoring it here is what keeps the NEW answer from being closed
         // empty the instant the learner barges in.
-        if (freshTurnPendingRef.current) return;
+        if (freshTurnPendingRef.current) {
+          staleAudioUntilRef.current = 0;
+          return;
+        }
         finishPendingAssistant();
         return;
       }
@@ -1651,12 +2086,25 @@ export default function App() {
           pendingAssistantTextRef.current,
           transcript,
         );
+        // When the voice has already caught up with the audio posted so far,
+        // late transcription belongs to that last packet: extend its endpoint
+        // so the board follows instead of waiting for words already heard.
+        // While the buffer is still deep, the text is genuinely ahead of the
+        // voice and must not be attached early.
+        const lastEntry = audioTimelineRef.current[audioTimelineRef.current.length - 1];
+        if (
+          lastEntry &&
+          lastEntry.chars < pendingAssistantTextRef.current.length &&
+          postedAudioRef.current - audioPlayedSeconds() < 0.6
+        ) {
+          lastEntry.chars = pendingAssistantTextRef.current.length;
+        }
         scheduleTranscriptFlush(assistantId);
         flushSpokenExamples();
         maybeRevealQueuedBlocks();
       }
     },
-    [ensurePendingAssistant, finishPendingAssistant, flushSpokenExamples, maybeRevealQueuedBlocks, playPcmChunk, scheduleTranscriptFlush, stopAudio],
+    [ensurePendingAssistant, finishPendingAssistant, flushSpokenExamples, maybeRevealQueuedBlocks, playPcmChunk, scheduleTranscriptFlush, audioPlayedSeconds],
   );
 
   // Server went silent mid-turn (dropped socket, aborted generation, quota)
@@ -1765,6 +2213,10 @@ export default function App() {
     const calls = toolCall.functionCalls ?? [];
     if (!calls.length) return;
     turnToolsRef.current += calls.length;
+    // A tool call is new-turn content: the cancelled answer cannot send audio
+    // after it, so the short barge-in guard must not eat this answer's first
+    // syllables (heard as a word starting halfway through).
+    staleAudioUntilRef.current = 0;
 
     const responses = calls.map((call) => {
       const name = call.name ?? "";
@@ -1798,10 +2250,10 @@ export default function App() {
         if (pace.turn !== turnSeqRef.current) {
           pace.turn = turnSeqRef.current;
           pace.count = 0;
-          pace.transcriptLen = pendingAssistantTextRef.current.length;
+          pace.transcriptLen = audibleCharCount();
         }
         const spokenSinceLastWrite =
-          pendingAssistantTextRef.current.length - pace.transcriptLen;
+          audibleCharCount() - pace.transcriptLen;
         if (
           pace.count >= WRITE_PACE_FREE_WRITES &&
           spokenSinceLastWrite < WRITE_PACE_MIN_SPEECH_CHARS
@@ -1903,7 +2355,7 @@ export default function App() {
             return boardFullResponse(call, name, preparedExample.zone);
           }
           pace.count += 1;
-          pace.transcriptLen = pendingAssistantTextRef.current.length;
+          pace.transcriptLen = audibleCharCount();
           enqueueReveal(preparedExample.block);
           return {
             id: call.id,
@@ -1998,7 +2450,7 @@ export default function App() {
           return boardFullResponse(call, name, prepared.zone);
         }
         pace.count += 1;
-        pace.transcriptLen = pendingAssistantTextRef.current.length;
+        pace.transcriptLen = audibleCharCount();
         // Every block waits for speech progression — including the first. This
         // prevents a whole block/definition from appearing while Vox is still silent.
         enqueueReveal(prepared.block);
@@ -2308,7 +2760,7 @@ export default function App() {
       console.error("[maalam-live] tool response failed", err);
       pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "error" });
     }
-  }, [recentTranscript, commitBoardBlocks, eraseBoard, enqueueReveal, markZoneFull, boardFullResponse]);
+  }, [recentTranscript, audibleCharCount, commitBoardBlocks, eraseBoard, enqueueReveal, markZoneFull, boardFullResponse]);
 
   const buildSystemInstruction = useCallback(() => {
     const lexicon = lexiconRef.current;
@@ -2648,6 +3100,16 @@ export default function App() {
     pendingAudioChunksRef.current = appended ? [...(appended.audioChunks ?? [])] : [];
     speechStartRef.current = 0;
     scheduledDurationRef.current = 0;
+    // Re-anchor the transcript→audio map at this turn's first audio position.
+    // For a continuation/lecture splice the previous tail may still be playing;
+    // its text counts as already heard, and only the new packets move the board.
+    turnAudioStartRef.current = postedAudioRef.current;
+    audioTimelineRef.current = [{
+      audioEnd: postedAudioRef.current,
+      chars: appended ? appended.content.length : 0,
+    }];
+    lastAudioCharsRef.current = appended ? appended.content.length : 0;
+    lastRevealRef.current = { at: 0, transcriptLen: 0 };
     setMessages((current) => {
       if (appended) {
         return current.map((message) => (message.id === assistantId
@@ -2771,7 +3233,7 @@ export default function App() {
       // their previous turn's completion, so no stale packet can still be in
       // flight: do not clip the first syllables of the new audio. Only a real
       // learner barge-in needs a short guard against the cancelled answer's tail.
-      staleAudioUntilRef.current = options.preservePlayback || options.resume ? 0 : 300;
+      staleAudioUntilRef.current = options.preservePlayback || options.resume ? 0 : 150;
       sessionRef.current.sendClientContent({ turns: [{ role: "user", parts }], turnComplete: true });
       documentRemovedRef.current = false;
       return true;
