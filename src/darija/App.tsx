@@ -1995,8 +1995,19 @@ export default function App() {
     // An INVOLUNTARY cut (watchdog, socket, server cancel) is continued
     // automatically into the same bubble instead of asking the learner to re-ask.
     // A cut the learner caused (new message, stop, erase) carries no reason.
+    // A turn that completed with NOTHING AT ALL is also retried: the server can
+    // close an empty response, and without this the learner just sits in silence
+    // after sending until they notice nothing happened.
+    const emptyTurn = !text
+      && !audioChunks.length
+      && turnWritesRef.current === 0
+      && turnToolsRef.current === 0;
     let willResume = false;
-    if (id && interrupted && cutReason && !lectureActiveRef.current) {
+    if (
+      id &&
+      !lectureActiveRef.current &&
+      ((interrupted && cutReason) || (!interrupted && emptyTurn))
+    ) {
       const attempts = resumeAttemptsRef.current.id === id ? resumeAttemptsRef.current.count : 0;
       if (attempts < RESUME_MAX_ATTEMPTS) {
         willResume = true;
@@ -2055,13 +2066,14 @@ export default function App() {
     setIsResponding(false);
     setResumePending(willResume);
     if (lectureActiveRef.current) {
-      // Only a turn where the server produced NOTHING AT ALL counts as a failed
-      // continuation: a stall we cut ourselves (the server was alive but slow to
-      // start, e.g. a heavy PDF context) must not push the lecture toward its
-      // stop guard. Manual stop/disconnect clear lectureActiveRef before
-      // finishing the turn, so only genuine silent/stuck turns reach this counter.
+      // A turn that produced NO speech and NO audio is a failed continuation,
+      // even if the socket sent an empty turnComplete or a lone tool call: the
+      // learner sat in silence through the whole segment. Three of those in a
+      // row rebuild the session instead of letting the lecture run mute for
+      // minutes. Only manual stop/disconnect clear lectureActiveRef before
+      // finishing, so a real end never reaches this counter.
       if (!text && !audioChunks.length) {
-        if (!turnSawServerActivityRef.current) lectureEmptyTurnsRef.current += 1;
+        lectureEmptyTurnsRef.current += 1;
       } else {
         lectureEmptyTurnsRef.current = 0;
         lectureSilentReconnectsRef.current = 0;
