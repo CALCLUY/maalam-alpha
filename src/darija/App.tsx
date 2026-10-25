@@ -479,6 +479,25 @@ class MaalamPcmPlayer extends AudioWorkletProcessor {
       }
       return;
     }
+    if (message.type === "config") {
+      // A lecture runs as one continuous broadcast: hold a bigger standing
+      // cushion so the short generation gap between segments never reaches the
+      // learner. Tutoring keeps a smaller one for snappier replies.
+      if (typeof message.startReserveSeconds === "number") {
+        this.startReserve = Math.max(1, Math.round(sampleRate * message.startReserveSeconds));
+      }
+      if (typeof message.resumeReserveSeconds === "number") {
+        this.resumeReserve = Math.max(1, Math.round(sampleRate * message.resumeReserveSeconds));
+        this.resumeReserveInitial = this.resumeReserve;
+      }
+      if (typeof message.resumeReserveMaxSeconds === "number") {
+        this.resumeReserveMax = Math.max(1, Math.round(sampleRate * message.resumeReserveMaxSeconds));
+      }
+      if (typeof message.startMaxWaitSeconds === "number") {
+        this.startMaxWait = Math.max(1, Math.round(sampleRate * message.startMaxWaitSeconds));
+      }
+      return;
+    }
     if (message.type === "reset") {
       this.readIndex = 0;
       this.writeIndex = 0;
@@ -1025,6 +1044,9 @@ export default function App() {
   const [isResponding, setIsResponding] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  /** Re-renders the transcript while audio plays, so gated chat text advances
+   *  word by word with the voice (no state copy: display is sliced at render). */
+  const [, setSpeechFrame] = useState(0);
   const [useDodaRefs, setUseDodaRefs] = useState(true);
   const [teachingPreferences, setTeachingPreferences] = useState<TeachingPreferences>({ ...DEFAULT_TEACHING_PREFERENCES });
   const [tutorAction, setTutorAction] = useState<TutorAction>("message");
@@ -1224,11 +1246,18 @@ export default function App() {
   const pendingAssistantIdRef = useRef<string | null>(null);
   const pendingAssistantTextRef = useRef("");
   const pendingAudioChunksRef = useRef<string[]>([]);
+  /** Finished turns whose audio tail is still playing. Their chat text keeps
+   *  advancing with the voice instead of printing the whole answer the instant
+   *  turnComplete arrives (which is what made the bubble read the words before
+   *  the learner heard them). */
+  const speechTailRef = useRef(new Map<string, { text: string; heard: number; audioAt: number }>());
   /** True from sending a learner turn until its first server payload: a late
    *  interrupted/turnComplete from the cancelled previous turn is then stale. */
   const freshTurnPendingRef = useRef(false);
   /** When the app last sent client content (used to recognise stale cancels). */
   const lastClientSendAtRef = useRef(0);
+  /** When the last tool result went back to the model (lecture stall recovery). */
+  const lastToolResponseAtRef = useRef(0);
   /** Why the current answer was closed: only involuntary reasons are auto-resumed. */
   const cutReasonRef = useRef<"" | "watchdog" | "transport" | "server">("");
   /** An answer cut short, waiting to be continued into the same bubble. */
@@ -1439,6 +1468,34 @@ export default function App() {
     pending.forEach((samples) => scheduleLegacySamples(samples, context));
   }, [scheduleLegacySamples]);
 
+  /** Lecture = one continuous broadcast. The player holds a larger standing
+   *  cushion so a 1-2 s generation gap between segments never becomes an
+   *  audible stop; normal tutoring stays snappier. */
+  const configureWorkletBuffers = useCallback((lecture: boolean) => {
+    const node = workletNodeRef.current;
+    if (!node) return;
+    try {
+      node.port.postMessage({
+        type: "config",
+        ...(lecture
+          ? {
+              startReserveSeconds: 2.2,
+              resumeReserveSeconds: 0.7,
+              resumeReserveMaxSeconds: 1.3,
+              startMaxWaitSeconds: 3.4,
+            }
+          : {
+              startReserveSeconds: 1.25,
+              resumeReserveSeconds: 0.65,
+              resumeReserveMaxSeconds: 1.8,
+              startMaxWaitSeconds: 2.4,
+            }),
+      });
+    } catch {
+      // Node already gone.
+    }
+  }, []);
+
   const initWorklet = useCallback((context: AudioContext) => {
     if (workletInitStartedRef.current) return;
     workletInitStartedRef.current = true;
@@ -1454,6 +1511,14 @@ export default function App() {
         numberOfInputs: 0,
         numberOfOutputs: 1,
         outputChannelCount: [1],
+        processorOptions: lectureActiveRef.current
+          ? {
+              startReserveSeconds: 2.2,
+              resumeReserveSeconds: 0.7,
+              resumeReserveMaxSeconds: 1.3,
+              startMaxWaitSeconds: 3.4,
+            }
+          : undefined,
       });
       node.connect(gainNodeRef.current);
       node.port.onmessage = (event: MessageEvent<PlayerStatusMessage>) => {
@@ -1502,13 +1567,14 @@ export default function App() {
       // The module may finish loading after a barge-in already advanced the
       // epoch: align the fresh processor before handing it the held packets.
       node.port.postMessage({ type: "reset", stream: workletStreamRef.current });
+      configureWorkletBuffers(lectureActiveRef.current);
       flushPendingWorkletSamples(node);
     }).catch(() => {
       URL.revokeObjectURL(url);
       if (audioContextRef.current !== context) return;
       fallbackToLegacy(context);
     });
-  }, [fallbackToLegacy, flushPendingWorkletSamples]);
+  }, [configureWorkletBuffers, fallbackToLegacy, flushPendingWorkletSamples]);
 
   const ensureAudio = useCallback(() => {
     if (!audioContextRef.current || audioContextRef.current.state === "closed") {
@@ -1591,6 +1657,9 @@ export default function App() {
     legacyStreamStartRef.current = 0;
     scheduledDurationRef.current = 0;
     speechStartRef.current = 0;
+    // Audio is gone: nothing is left to wait for, so every finished bubble can
+    // show its complete text again.
+    speechTailRef.current.clear();
   }, []);
 
   /** Starts whatever the worklet still holds. Used when the server says the
@@ -1709,24 +1778,6 @@ export default function App() {
     [ensureAudio, scheduleLegacySamples],
   );
 
-  /** Transcription arrives with every audio packet. Re-rendering the whole app
-   *  on each delta steals main-thread time from scheduling the next audio
-   *  chunks — audible as choppy speech — so React state is refreshed on a
-   *  fixed cadence while the raw text in the ref stays exact for all the
-   *  pacing/reveal logic. */
-  const scheduleTranscriptFlush = useCallback((assistantId: string) => {
-    if (transcriptFlushTimerRef.current !== null) return;
-    transcriptFlushTimerRef.current = window.setTimeout(() => {
-      transcriptFlushTimerRef.current = null;
-      const text = pendingAssistantTextRef.current;
-      setMessages((current) =>
-        current.map((item) =>
-          item.id === assistantId ? { ...item, content: text } : item,
-        ),
-      );
-    }, TRANSCRIPT_FLUSH_MS);
-  }, []);
-
   /* --------------------------- Live messages ---------------------------- */
   const ensurePendingAssistant = useCallback(() => {
     if (pendingAssistantIdRef.current) return pendingAssistantIdRef.current;
@@ -1805,6 +1856,61 @@ export default function App() {
     const heard = audibleCharCount();
     return source.slice(0, Math.min(source.length, Math.max(0, heard)));
   }, [audibleCharCount]);
+
+  /** Transcription arrives with every audio packet. Re-rendering the whole app
+   *  on each delta steals main-thread time from scheduling the next audio
+   *  chunks, so React state is refreshed on a fixed cadence while the raw text
+   *  in the ref stays exact for all the pacing/reveal logic. */
+  const scheduleTranscriptFlush = useCallback((assistantId: string) => {
+    if (transcriptFlushTimerRef.current !== null) return;
+    transcriptFlushTimerRef.current = window.setTimeout(() => {
+      transcriptFlushTimerRef.current = null;
+      const text = pendingAssistantTextRef.current;
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === assistantId ? { ...item, content: text } : item,
+        ),
+      );
+    }, TRANSCRIPT_FLUSH_MS);
+  }, []);
+
+  /** How much of a finished turn's text the learner has actually heard by now.
+   *  The tail keeps its own audio anchor: a lecture starts the next turn while
+   *  this tail is still playing, so the live turn's mapping cannot be reused. */
+  const tailVisibleChars = useCallback((tail: { text: string; heard: number; audioAt: number }) => {
+    const elapsed = Math.max(
+      0,
+      audioPlayedSeconds() - tail.audioAt - SPEECH_REVEAL_LAG_SECONDS,
+    );
+    return Math.min(
+      tail.text.length,
+      tail.heard + Math.floor(elapsed * SPEECH_CHARS_PER_SECOND),
+    );
+  }, [audioPlayedSeconds]);
+
+  /** Text shown in an assistant bubble. The raw transcript and the full final
+   *  text both run ahead of the buffered voice, so display is always cut at the
+   *  audible character position: the learner never reads a word before hearing
+   *  it. Older messages are returned untouched. */
+  const assistantDisplayText = useCallback((message: ChatMessage) => {
+    if (message.role !== "assistant" || !message.content) return message.content;
+    let limit = message.content.length;
+    if (message.id === pendingAssistantIdRef.current) {
+      limit = Math.min(limit, Math.max(0, audibleCharCount()));
+    } else {
+      const tail = speechTailRef.current.get(message.id);
+      if (tail && isSpeaking) limit = Math.min(limit, Math.max(0, tailVisibleChars(tail)));
+    }
+    return limit >= message.content.length ? message.content : message.content.slice(0, limit);
+  }, [audibleCharCount, isSpeaking, tailVisibleChars]);
+
+  // While the voice plays, keep re-rendering the transcript even when no new
+  // transcription arrives: the gated bubble must grow with the audio tail.
+  useEffect(() => {
+    if (!isSpeaking) return;
+    const timer = window.setInterval(() => setSpeechFrame((frame) => frame + 1), 250);
+    return () => window.clearInterval(timer);
+  }, [isSpeaking]);
 
   /**
    * Releases queued examples once they are actually spoken.
@@ -1992,6 +2098,25 @@ export default function App() {
     const heardChars = Math.min(rawText.length, Math.max(0, audibleCharCount()));
     const heardText = rawText.slice(0, heardChars).trim();
 
+    // The bubble receives the full text below, but the voice is still buffered:
+    // remember the unheard tail so the renderer can keep the chat behind the
+    // audio (a lecture immediately starts the next segment on top of this tail).
+    if (
+      id &&
+      !interrupted &&
+      text &&
+      heardChars < text.length &&
+      (audioPlayingRef.current || workletQueuedRef.current > 0)
+    ) {
+      speechTailRef.current.set(id, {
+        text,
+        heard: heardChars,
+        audioAt: audioPlayedSeconds(),
+      });
+    } else if (id) {
+      speechTailRef.current.delete(id);
+    }
+
     // An INVOLUNTARY cut (watchdog, socket, server cancel) is continued
     // automatically into the same bubble instead of asking the learner to re-ask.
     // A cut the learner caused (new message, stop, erase) carries no reason.
@@ -2119,7 +2244,7 @@ export default function App() {
     // tail keeps playing, and an extra half-second here only increased the gap
     // the worklet had to bridge at every segment boundary.
     if (lectureActiveRef.current) lectureScheduleRef.current(120);
-  }, [audibleCharCount, flushSpokenExamples, flushRevealQueue, setCoverage]);
+  }, [audibleCharCount, audioPlayedSeconds, flushSpokenExamples, flushRevealQueue, setCoverage]);
 
   const processLiveMessage = useCallback(
     (message: LiveServerMessage) => {
@@ -2360,7 +2485,9 @@ export default function App() {
         // Speech pacing: a few stacked lines are fine while starting an idea,
         // but past that the tutor MUST speak between writes. Silent write
         // bursts leave the student hearing nothing while the board fills up
-        // and ends the turn on board_full.
+        // and ends the turn on board_full. A lecture is exempt: its writes are
+        // queued and revealed with the voice, so refusing them only interrupts
+        // the continuous story (and the refusal itself prompts a new burst).
         const pace = writePaceRef.current;
         if (pace.turn !== turnSeqRef.current) {
           pace.turn = turnSeqRef.current;
@@ -2370,6 +2497,7 @@ export default function App() {
         const spokenSinceLastWrite =
           audibleCharCount() - pace.transcriptLen;
         if (
+          !lectureActiveRef.current &&
           pace.count >= WRITE_PACE_FREE_WRITES &&
           spokenSinceLastWrite < WRITE_PACE_MIN_SPEECH_CHARS
         ) {
@@ -2441,7 +2569,9 @@ export default function App() {
             };
           }
           const spoken = recentTranscript();
-          if (!exampleMentionedInSpeech(args, spoken)) {
+          // A lecture must not stop to wait for a speech-match round trip: the
+          // reveal queue already holds every line until its words are heard.
+          if (!lectureActiveRef.current && !exampleMentionedInSpeech(args, spoken)) {
             pendingExamplesRef.current = [...pendingExamplesRef.current, { args: writeArgs, at: Date.now() }];
             return {
               id: call.id,
@@ -2481,7 +2611,9 @@ export default function App() {
               id: preparedExample.block.id,
               type: preparedExample.block.type,
               color: preparedExample.block.color,
-              message: "The example is queued to appear in sync with its spoken Darija lines; do not repeat it or write it a second time.",
+              message: lectureActiveRef.current
+                ? "Example queued; it appears on the board when your voice reaches its Darija body. Keep the lecture flowing and do not retry it."
+                : "The example is queued to appear in sync with its spoken Darija lines; do not repeat it or write it a second time.",
             },
           };
         }
@@ -2578,8 +2710,9 @@ export default function App() {
             id: prepared.block.id,
             type: prepared.block.type,
             color: prepared.block.color,
-            message:
-              "On the board (revealing in sync with your speech). Now speak the WHY in darija referencing this exact line — do not read the board aloud or restate it word for word.",
+            message: lectureActiveRef.current
+              ? "On the board (revealing in sync with your voice). Keep the lecture flowing: do not stop, do not read it aloud, and do not wait for the write."
+              : "On the board (revealing in sync with your speech). Now speak the WHY in darija referencing this exact line — do not read the board aloud or restate it word for word.",
           },
         };
       }
@@ -2865,27 +2998,38 @@ export default function App() {
     // and a blocking call AUTO-CANCELS the current generation. With a board
     // write every few seconds, blocking was chopping the voice mid-sentence at
     // each write. Non-blocking lets the model keep talking while the write
-    // lands. The acknowledgment is still delivered WHEN_IDLE, never SILENT:
-    // SILENT tells the model there is nothing to answer, so a write that landed
-    // while it was mid-answer could stop the generation right there — the
-    // voice died after a board line and the learner heard a cut sentence.
+    // lands.
+    //
+    // Scheduling: a write that lands BEFORE the voice starts uses WHEN_IDLE so
+    // the model is prompted to speak; a write that lands once the voice is
+    // already flowing uses SILENT. WHEN_IDLE there asks for a second speech
+    // burst after the current one — the pause/extra turn that made a lecture
+    // sound chopped. SILENT only records the result and never interrupts or
+    // triggers generation.
+    const lectureAudioStarted =
+      lectureActiveRef.current &&
+      pendingAudioChunksRef.current.length > 0;
     const scheduledResponses = responses.map((item) => {
       const payload = item.response as { status?: unknown; type?: unknown };
+      const settled =
+        payload.status === "ok" ||
+        payload.status === "duplicate" ||
+        payload.status === "queued";
+      if (lectureAudioStarted && settled && payload.type !== "question") {
+        return { ...item, scheduling: FunctionResponseScheduling.SILENT };
+      }
       const mechanical =
         item.name === "board_write" ||
         item.name === "board_annotate" ||
         item.name === "board_connect" ||
         item.name === "board_clear" ||
         item.name === "board_remove";
-      const settled =
-        payload.status === "ok" ||
-        payload.status === "duplicate" ||
-        payload.status === "queued";
       if (!mechanical || !settled || payload.type === "question") return item;
       return { ...item, scheduling: FunctionResponseScheduling.WHEN_IDLE };
     });
     try {
       sessionRef.current?.sendToolResponse({ functionResponses: scheduledResponses });
+      lastToolResponseAtRef.current = Date.now();
     } catch (err) {
       // A failed response must not throw into the SDK's receive loop.
       console.error("[maalam-live] tool response failed", err);
@@ -3183,6 +3327,7 @@ export default function App() {
     turnSeqRef.current += 1;
     turnWritesRef.current = 0;
     turnToolsRef.current = 0;
+    lastToolResponseAtRef.current = 0;
     if (!options.preservePlayback) recentAudioHashesRef.current = [];
     pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "turn-start", turn: turnSeqRef.current });
 
@@ -3484,6 +3629,7 @@ export default function App() {
     lectureArmedRef.current = false;
     setLectureArmed(false);
     lectureActiveRef.current = true;
+    configureWorkletBuffers(true);
     lectureEndsAtRef.current = endsAt;
     lectureSegmentsRef.current = 0;
     lectureDocumentModeRef.current = documentMode;
@@ -3532,6 +3678,7 @@ export default function App() {
     const wasActive = lectureActiveRef.current;
     const seedPending = lectureSeedRef.current !== null;
     lectureActiveRef.current = false;
+    configureWorkletBuffers(false);
     lectureEndsAtRef.current = null;
     lectureSeedRef.current = null;
     lectureSilentReconnectsRef.current = 0;
@@ -3550,7 +3697,7 @@ export default function App() {
       stopAudio();
       finishPendingAssistant(true);
     }
-  }, [finishPendingAssistant, stopAudio]);
+  }, [configureWorkletBuffers, finishPendingAssistant, stopAudio]);
 
   const startLectureFromControl = () => {
     const outcome = beginLecture({ text: input });
@@ -3745,12 +3892,51 @@ export default function App() {
       }
       if (pendingAssistantIdRef.current) {
         const idleMs = Date.now() - lastServerActivityRef.current;
+        // Fast recovery for the known 3.8 Live failure: after an async tool
+        // result the model can keep the turn open but produce no audio. A
+        // lecture cannot wait for the 10 s watchdog — that is most of a beat
+        // of dead air. Nudge once, only when the tool result is already old and
+        // not a single audio packet has arrived for this turn.
+        const toolIdleMs = lastToolResponseAtRef.current
+          ? Date.now() - lastToolResponseAtRef.current
+          : 0;
+        if (
+          pendingAudioChunksRef.current.length === 0 &&
+          toolIdleMs > 3_500 &&
+          idleMs > 3_500 &&
+          lastSpeechNudgeSeqRef.current !== turnSeqRef.current &&
+          sessionRef.current
+        ) {
+          lastSpeechNudgeSeqRef.current = turnSeqRef.current;
+          pushAudioLog(audioLogRef.current, {
+            at: Date.now(),
+            kind: "watchdog",
+            state: "nudge",
+          });
+          try {
+            lastClientSendAtRef.current = Date.now();
+            lastServerActivityRef.current = Date.now();
+            sessionRef.current.sendClientContent({
+              turns: [{
+                role: "user",
+                parts: [{
+                  text:
+                    "[VOX-DIRECTOR] The lecture went silent after a board/tool action: the learner hears nothing. " +
+                    "Do not call any more tools now. Speak immediately in Darija and continue the same beat in ONE continuous audio stretch.",
+                }],
+              }],
+              turnComplete: true,
+            });
+          } catch {
+            // Socket already gone; the reconnect path takes over.
+          }
+        }
         // A turn that never produced a single frame gets a grace window (heavy
         // PDF/image contexts are slow to start, but a silent lecture teaches
         // nothing, so it is tighter than the normal-mode window); a turn that
         // went silent mid-generation is cut sooner.
         const sawActivity = turnSawServerActivityRef.current;
-        const stallLimit = sawActivity ? 10_000 : 15_000;
+        const stallLimit = sawActivity ? 8_000 : 12_000;
         if (idleMs > stallLimit) {
           finishPendingAssistant(true);
           // A whole segment with not ONE server frame means the socket is very
@@ -4587,7 +4773,9 @@ export default function App() {
           </div>
         ) : (
           <div className="relative z-10 mx-auto w-full max-w-3xl px-4 pb-16 pt-10 sm:px-6 sm:pt-14">
-            {messages.filter((message) => !message.hidden).map((message) => (
+            {messages.filter((message) => !message.hidden).map((message) => {
+              const shownContent = assistantDisplayText(message);
+              return (
               <article
                 key={message.id}
                 className={`message-enter mb-10 flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
@@ -4623,12 +4811,12 @@ export default function App() {
                       <MaalamLogo size="sm" />
                     </div>
                     <div className="min-w-0 flex-1 pt-1">
-                      {message.content ? (
+                      {shownContent ? (
                         <p
                           className="whitespace-pre-wrap text-[15px] leading-8 text-zinc-200 sm:text-base sm:leading-8"
                           dir="auto"
                         >
-                          {message.content}
+                          {shownContent}
                           {message.status === "streaming" && <span className="streaming-caret" />}
                         </p>
                       ) : message.status === "streaming" ? (
@@ -4665,7 +4853,8 @@ export default function App() {
                   </div>
                 )}
               </article>
-            ))}
+              );
+            })}
             <div ref={conversationEndRef} />
           </div>
         )}
