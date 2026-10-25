@@ -2105,12 +2105,12 @@ export default function App() {
       id &&
       !interrupted &&
       text &&
-      heardChars < text.length &&
+      heardText.length < text.length &&
       (audioPlayingRef.current || workletQueuedRef.current > 0)
     ) {
       speechTailRef.current.set(id, {
         text,
-        heard: heardChars,
+        heard: heardText.length,
         audioAt: audioPlayedSeconds(),
       });
     } else if (id) {
