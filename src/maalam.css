@@ -20,7 +20,7 @@
   --m-radius: 1.25rem;
 }
 
-body,
+#root,
 .setup-screen,
 .chat-shell {
   background-color: var(--m-bg);
@@ -33,7 +33,7 @@ body,
     var(--m-bg);
 }
 
-::selection {
+#root ::selection {
   background: rgba(52, 214, 164, 0.35);
 }
 
@@ -525,7 +525,7 @@ body,
 }
 
 /* Scrollbars follow the brand */
-* {
+#root * {
   scrollbar-color: #2a3a37 transparent;
 }
 

@@ -19,7 +19,7 @@
   --ui-gold: #f4d97c;
 }
 
-body,
+#root,
 .setup-screen,
 .chat-shell {
   background-color: var(--ui-bg);
@@ -44,12 +44,12 @@ body,
   display: none;
 }
 
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-summary:focus-visible {
+#root button:focus-visible,
+#root a:focus-visible,
+#root input:focus-visible,
+#root select:focus-visible,
+#root textarea:focus-visible,
+#root summary:focus-visible {
   outline: 2px solid rgba(69, 214, 168, 0.55);
   outline-offset: 2px;
 }
