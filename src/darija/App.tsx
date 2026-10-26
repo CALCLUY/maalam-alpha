@@ -114,7 +114,11 @@ import {
   type BoardZone,
 } from "./board";
 
-import { LiquidGlass } from "@sohumsuthar/liquid-glass";
+// esm.sh builds this package file-by-file, and its `.jsx` hook sources currently
+// 404/500 there (cjsModuleLexer panic), which killed the whole App module. The
+// prebundled build of the same version works, and `deps` pins it to the host's
+// React so there is still exactly one React instance.
+import { LiquidGlass } from "https://esm.sh/@sohumsuthar/liquid-glass@3.1.0?target=es2022&bundle&deps=react@19.2.6";
 import { QuizPanel } from "./quiz/QuizPanel";
 import type { QuizItem, QuizKind } from "./quiz/types";
 
