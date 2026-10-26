@@ -1110,7 +1110,7 @@ function TeachingSettings({
 }
 
 export default function App() {
-  const [view, setView] = useState<"setup" | "chat">("setup");
+  const [view, setView] = useState<"setup" | "chat">("chat");
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
