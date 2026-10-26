@@ -114,7 +114,7 @@ import {
   type BoardZone,
 } from "./board";
 
-import { LiquidGlass } from "@sohumsuthar/liquid-glass";
+import { LiquidGlass } from "./LiquidGlass";
 import { QuizPanel } from "./quiz/QuizPanel";
 import type { QuizItem, QuizKind } from "./quiz/types";
 
