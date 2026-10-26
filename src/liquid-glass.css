@@ -19,18 +19,18 @@
   --lg-panel-deep: rgba(8, 19, 15, 0.82);
 }
 
-#root {
+html {
   background: var(--lg-bg);
 }
 
-#root,
+body,
 .setup-screen,
 .chat-shell {
   background-color: transparent;
   color: var(--lg-ink);
 }
 
-#root {
+body {
   background:
     radial-gradient(58rem 42rem at 8% -8%, rgba(31, 167, 126, 0.18), transparent 62%),
     radial-gradient(52rem 40rem at 108% 8%, rgba(36, 132, 105, 0.16), transparent 60%),
@@ -692,14 +692,14 @@
 }
 
 /* ---- Scrollbar ---------------------------------------------------------- */
-#root ::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 999px;
   background: rgba(133, 173, 158, 0.28);
   background-clip: padding-box;
 }
 
-#root ::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover {
   background: rgba(153, 197, 181, 0.4);
   background-clip: padding-box;
 }

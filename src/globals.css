@@ -1,8 +1,6 @@
 @import "tailwindcss";
 
-/* App shell scope: global rules are limited to #root so the host app
-   (splash, error screen, bottom nav, overlays) keeps its own styling. */
-#root {
+:root {
   color-scheme: dark;
   font-family:
     "IBM Plex Sans Arabic", "Noto Sans Arabic", "Segoe UI", Tahoma, ui-sans-serif, system-ui,
@@ -11,57 +9,54 @@
   text-rendering: optimizeLegibility;
 }
 
-#root [dir="auto"] {
+[dir="auto"] {
   unicode-bidi: plaintext;
 }
 
-#root textarea,
-#root input {
+textarea,
+input {
   text-align: start;
 }
 
-#root * {
+* {
   box-sizing: border-box;
 }
 
 html,
-body {
+body,
+#root {
   min-height: 100%;
   margin: 0;
 }
 
-#root {
-  min-height: 100dvh;
-}
-
-#root {
+body {
   background: #090a0c;
 }
 
-#root button,
-#root input,
-#root textarea {
+button,
+input,
+textarea {
   font: inherit;
 }
 
-#root button {
+button {
   -webkit-tap-highlight-color: transparent;
 }
 
-#root ::selection {
+::selection {
   background: rgba(109, 124, 255, 0.35);
   color: white;
 }
 
-#root ::-webkit-scrollbar {
+::-webkit-scrollbar {
   width: 8px;
 }
 
-#root ::-webkit-scrollbar-track {
+::-webkit-scrollbar-track {
   background: transparent;
 }
 
-#root ::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 999px;
   background: #292b31;
@@ -1280,11 +1275,11 @@ select.doc-action {
   font-size: 0.67rem;
 }
 
-#root button:focus-visible,
-#root a:focus-visible,
-#root select:focus-visible,
-#root summary:focus-visible,
-#root input[type="radio"]:focus-visible {
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+summary:focus-visible,
+input[type="radio"]:focus-visible {
   outline: 2px solid #a3aeff;
   outline-offset: 4px;
 }
