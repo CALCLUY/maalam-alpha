@@ -1,4 +1,4 @@
-declare module "https://esm.sh/@sohumsuthar/liquid-glass*" {
+declare module "@sohumsuthar/liquid-glass" {
   import type { CSSProperties, ReactElement, ReactNode } from "react";
 
   export interface LiquidGlassProps {
