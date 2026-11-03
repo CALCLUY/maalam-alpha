@@ -194,6 +194,31 @@ const SPEECH_REVEAL_LAG_SECONDS = 0.5;
  */
 const WRITE_PACE_FREE_WRITES = 1;
 const WRITE_PACE_MIN_SPEECH_CHARS = 30;
+/**
+ * A turn where the learner says they did not understand / asks to repeat. The
+ * board is the thing that makes a re-teach different from a repetition, so such
+ * a turn may wipe a full zone itself and write a simpler version into it.
+ */
+const RETEACH_PATTERN =
+  /ما\s*فهمت|مفهمتش|مفهمت\s*والو|مازال\s*مفهمت|ما\s*واضح|مش\s*واضح|ماعقلت|عاود\s*(ليا|شرح|قول|من)|عاودها|شرح\s*(ليا)?\s*(ب|بـ)?\s*(طريقة|بساط|سهل)|بطريقة\s*(أ|ا)?سهل|بسّط|بسط\s*ليا|i\s*(did\s*n[o']?t|don'?t)\s*understand|explain\s*(it\s*)?again|repeat\s*(it|that)?|simpler/i;
+
+/**
+ * Turns whose answer must leave a reference on the board. A turn that only
+ * speaks on one of these is nudged once to write (see finishPendingAssistant).
+ * Conversational and pure-question actions are deliberately absent.
+ */
+const BOARD_EXPECTED_ACTIONS = new Set<TutorAction>([
+  "message",
+  "continue",
+  "simpler",
+  "example",
+  "hint",
+  "practice",
+  "wrapup",
+  "doc_start",
+  "doc_lesson",
+  "doc_exercises",
+]);
 /** Minimum overlap to treat as a Live re-send (below this, keep both halves). */
 const TRANSCRIPT_OVERLAP_MIN = 16;
 
@@ -1224,6 +1249,8 @@ export default function App() {
   const boardErasingRef = useRef(false);
   /** After a full wipe, ignore "board full" and tell the tutor the slate is empty. */
   const justErasedRef = useRef(false);
+  /** True while the current learner turn is a re-teach ("I did not understand" / "repeat"). */
+  const reteachTurnRef = useRef(false);
 
   /* Zones that are out of room. Nothing is EVER erased to make space: the board
      keeps exactly what the learner was shown and asks for permission instead. */
@@ -1252,6 +1279,10 @@ export default function App() {
   const turnToolsRef = useRef(0);
   /** The user turn a speech nudge was already sent for (at most one nudge each). */
   const lastSpeechNudgeSeqRef = useRef(-1);
+  /** The user turn a "you spoke but wrote nothing" nudge was already sent for. */
+  const lastBoardNudgeSeqRef = useRef(-1);
+  /** The action that opened the current turn (decides whether a board write is expected). */
+  const turnActionRef = useRef<TutorAction>("message");
   useEffect(() => {
     fullZonesRef.current = fullZones;
   }, [fullZones]);
@@ -2352,6 +2383,37 @@ export default function App() {
       }
     }
 
+    // The mirror failure: the turn SPOKE a real explanation but wrote nothing.
+    // The learner then has nothing to reread and nothing to point at, which is
+    // what "it just keeps talking" feels like. One nudge per turn asks for the
+    // reference lines only — never a repeat of the explanation.
+    if (
+      !interrupted &&
+      !lectureActiveRef.current &&
+      text.length >= 120 &&
+      turnWritesRef.current === 0 &&
+      BOARD_EXPECTED_ACTIONS.has(turnActionRef.current) &&
+      lastBoardNudgeSeqRef.current !== turnSeqRef.current &&
+      sessionRef.current
+    ) {
+      lastBoardNudgeSeqRef.current = turnSeqRef.current;
+      const nudge =
+        "[VOX-DIRECTOR] You just explained without writing ANYTHING on the board — the learner has only your voice to hold on to and nothing to reread or point at. " +
+        "Do NOT repeat the explanation and do NOT re-say what you already said. Write the reference for the idea you just explained, compactly: " +
+        "one heading plus 1-3 short lines (formal French, exam notation), circle or arrow the one symbol/word that carries the point, " +
+        "and add one concrete example in the example zone if the idea needs it. In the same response say ONE short Darija sentence per line (the why, not a reading), " +
+        "so each line appears with your voice. Then stop. [/VOX-DIRECTOR]";
+      try {
+        lastClientSendAtRef.current = Date.now();
+        sessionRef.current.sendClientContent({
+          turns: [{ role: "user", parts: [{ text: nudge }] }],
+          turnComplete: true,
+        });
+      } catch {
+        // The session is gone; nothing to resume.
+      }
+    }
+
     // A finished segment is the exact moment to queue the next lecture segment.
     // Scheduling here (instead of relying only on an isResponding state effect)
     // keeps the lecture going even when a late packet or tool call changes React
@@ -2549,7 +2611,28 @@ export default function App() {
           },
         };
       }
-      markZoneFull(zone);
+      if (reteachTurnRef.current) {
+        // Re-teach with no room left: asking "shall I erase?" here is what made
+        // the tutor stall and then replay the same speech. The board is the
+        // difference between a repetition and a re-teach, so wipe the zone and
+        // have it write the SIMPLER version into the fresh space.
+        if (!boardErasingRef.current) eraseBoard(zone);
+        return {
+          id: call.id,
+          name,
+          response: {
+            status: "wiping",
+            retryable: true,
+            message:
+              `RE-TEACH: the ${zoneLabel} was full, so the app wiped it for you. Nobody will be asked for permission. ` +
+              "Do NOT ask to erase, do NOT apologise, and do NOT resend the same content — the student already told you it did not work. " +
+              "Write the SIMPLER version of the same point into the fresh board: one heading + at most 3 short lines, " +
+              "the other representation of the subject (concrete number, schema, timeline, contrastive pair or trace), " +
+              "then circle the exact symbol/word that was unclear and arrow it to its plain Darija meaning. " +
+              "Add one concrete everyday example in the example zone, say it out loud, and finish with ONE tiny check question.",
+          },
+        };
+      }
       return {
         id: call.id,
         name,
@@ -2568,9 +2651,11 @@ export default function App() {
 
   // One overflow policy for every path (tool calls, speech-synced example
   // writes, reveal pacing, the board's own detector): in lecture mode the zone
-  // is wiped automatically and the learner never sees the erase control.
+  // is wiped automatically and the learner never sees the erase control. A
+  // re-teach turn does the same — a full board must not block a simpler
+  // explanation.
   zoneFullRef.current = (zone: BoardZone) => {
-    if (lectureActiveRef.current) {
+    if (lectureActiveRef.current || reteachTurnRef.current) {
       if (!boardErasingRef.current) eraseBoard(zone);
       return;
     }
@@ -3477,6 +3562,12 @@ export default function App() {
     turnWritesRef.current = 0;
     turnToolsRef.current = 0;
     lastToolResponseAtRef.current = 0;
+    // Re-teach turn: the learner says they are lost or asks to repeat. A full
+    // board must not turn this into "shall I erase?" — the app wipes and the
+    // tutor writes a SIMPLER version instead of replaying the same lines.
+    reteachTurnRef.current =
+      !options.resume && action !== "lecture" && (action === "simpler" || RETEACH_PATTERN.test(text));
+    turnActionRef.current = action;
     pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "turn-start", turn: turnSeqRef.current });
 
     ensureAudio();
@@ -3614,7 +3705,7 @@ export default function App() {
           ? [{ text: "[VOX-TUTOR] The learner removed the previously uploaded PDF. Stop teaching from it unless they mention it again. [/VOX-TUTOR]" }]
           : []),
         ...(referenceBlock ? [{ text: referenceBlock }] : []),
-        { text: buildTutorTurnContext(teachingPreferences, action) },
+        { text: buildTutorTurnContext(teachingPreferences, reteachTurnRef.current && action === "message" ? "simpler" : action) },
         ...(options.boardNote ? [{ text: options.boardNote }] : []),
         ...(options.lectureContext ? [{ text: options.lectureContext }] : []),
         ...(coverageBlock ? [{ text: coverageBlock }] : []),

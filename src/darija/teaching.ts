@@ -67,11 +67,17 @@ export const TEACHING_SOURCES = [
 
 const ACTION_INSTRUCTIONS: Record<TutorAction, string> = {
   message:
-    "Respond to the learner's message as the appropriate next step of the worked-example loop. Choose the representation and the check from the discipline playbook (see DISCIPLINE FIT): a derivation for maths, a schema/units for experimental sciences, a plan/quote for humanities, a model/transformation for languages, a trace/case for applied subjects. When presenting any formula or concept, PROACTIVELY point arrows to its symbols (board_annotate kind='arrow') to label what they mean, circle critical signs/exponents (board_annotate kind='circle'), and link steps with flow arrows (board_connect) WITHOUT waiting for the student to ask! For a procedural task (compute/solve/apply), run I DO first: write the short problem and its exam-notation steps in the middle zone, explaining each step in darija as you write. For a conceptual idea, explain it in darija with one small board-backed definition, then ask ONE application question in simple French and stop.",
+    "Respond to the learner's message as the appropriate next step of the worked-example loop. TALKING ALONE IS NOT TEACHING: before this turn ends you must put its idea on the board (at least one board_write: a heading plus the reference line) and mark the symbol you name (at least one circle/arrow; see SMART MARKS). If the learner asked a small question, the board line is still required — it is the answer they can reread. Choose the representation and the check from the discipline playbook (see DISCIPLINE FIT): a derivation for maths, a schema/units for experimental sciences, a plan/quote for humanities, a model/transformation for languages, a trace/case for applied subjects. When presenting any formula or concept, PROACTIVELY point arrows to its symbols (board_annotate kind='arrow') to label what they mean, circle critical signs/exponents (board_annotate kind='circle'), and link steps with flow arrows (board_connect) WITHOUT waiting for the student to ask! For a procedural task (compute/solve/apply), run I DO first: write the short problem and its exam-notation steps in the middle zone, explaining each step in darija as you write. For a conceptual idea, explain it in darija with one small board-backed definition, then ask ONE application question in simple French and stop.",
   continue:
-    "The learner pressed 'continue' WITHOUT answering. This is a request to keep explaining, NOT an answer to any question. Resume at the NEXT step — never replay the last spoken sentences. Then STOP again and wait. Hard rules: (1) if a question is still unanswered, do NOT answer it yourself and do NOT replace it with a new one — leave it pending; (2) keep this to 2-4 short spoken sentences and at most ONE new board block; (3) do not restart the topic, do not re-explain steps already on the board, do not greet again; (4) if a [VOX-BOARD] note says the board was just erased, it is EMPTY: write the next line, do NOT say it is full, do NOT ask to erase.",
+    "The learner pressed 'continue' WITHOUT answering. This is a request to keep explaining, NOT an answer to any question. Resume at the NEXT step — never replay the last spoken sentences. Then STOP again and wait. Hard rules: (1) if a question is still unanswered, do NOT answer it yourself and do NOT replace it with a new one — leave it pending; (2) keep this to 2-4 short spoken sentences and write the next line on the board as you say it — one new block is enough, but never zero; (3) do not restart the topic, do not re-explain steps already on the board, do not greet again; (4) if a [VOX-BOARD] note says the board was just erased, it is EMPTY: write the next line, do NOT say it is full, do NOT ask to erase.",
   simpler:
-    "The learner pressed 'I did not understand'. Do NOT repeat or paraphrase your previous explanation — it did not work. Re-teach the SAME point another way: change the REPRESENTATION to the one that fits the discipline (a graph or a concrete number for maths, a schema and units for science, a shorter plan or one key quote for humanities, a contrastive pair for languages), or take a smaller first step, in plain words, ONE idea only. Show what was confusing with a board mark (board_annotate circle/arrow on the exact symbol) instead of writing more text. Do not move on to new content. Finish with ONE tiny check question (simple French on the board) and stop.",
+    "The learner pressed 'I did not understand' (or typed that they are lost). REPEATING YOUR PREVIOUS EXPLANATION IS A FAILURE — so is paraphrasing it with the same structure. Re-teach the SAME point from a different angle, in this order: " +
+    "(1) NAME the likely block in one short Darija sentence (the symbol, the step, the word that is probably unclear) — do not ask which part; guess and address it. " +
+    "(2) CHANGE THE REPRESENTATION to the other form of this subject (a concrete number or mini-table for maths, a labelled schema with units for science, a timeline or one short quote for humanities, a contrastive pair for languages, a trace for CS). " +
+    "(3) SHRINK the step: teach only the smallest piece that can stand alone, in plain Darija, ONE idea. " +
+    "(4) WRITE THAT NEW FORM ON THE BOARD NOW: one heading plus at most 3 short lines, then circle the exact symbol/word that confused them and arrow it to its plain-Darija meaning. Keep the old material only if it is still needed; otherwise start a fresh area. " +
+    "(5) ADD ONE CONCRETE EVERYDAY EXAMPLE in the right (example) zone and say it out loud. " +
+    "Do NOT reuse a sentence from your previous explanation: if a new sentence would repeat one you already said, replace it with a new one. Never say you are repeating, never say 'كما شرحت ليك'. Do not move on to new content. Finish with ONE tiny check question in simple French and stop.",
   example:
     "The learner asked for ANOTHER example of the current idea. Give ONE new, different, concrete example (different numbers or situation than before), spoken aloud in darija — it will then appear in the right zone. Choose the example form that fits the discipline: another worked calculation, a labelled schema, a second quotation or document, a sentence pair, or a trace. If it is a worked calculation, write its steps in the middle zone as formal French and mark the step that uses the rule. Then ask ONE check question in simple French and stop. Do not re-explain the concept.",
   recap:
@@ -397,6 +403,28 @@ TURN DISCIPLINE
 - Prioritize scientific accuracy over a fluent analogy. Acknowledge limitations. Keep
   written explanations and spoken explanations consistent, readable and conversational.
 
+BOARD-FIRST RULE (the board is what the learner keeps; speech alone is not teaching)
+- EVERY teaching turn leaves something on the board before it ends: at least one
+  board_write (a heading plus the reference line for the idea), even when the learner
+  only asked a short question. A reply that only talks is an incomplete reply.
+- EVERY formula, definition, schema or labelled line gets at least ONE mark on the
+  exact symbol you name: circle the trap (sign, exponent, unit, term) or arrow the
+  symbol to its plain meaning. Marks are required, not decoration.
+- Keep it readable: one heading + 1-5 short lines per turn. When the unit on the board
+  is no longer what you are explaining, start a NEW heading instead of appending.
+
+RE-TEACH LADDER (when the learner says «ما فهمتش» / «عاود» or taps "I did not understand")
+- Repeating is the failure this ladder exists to prevent: never restate the same
+  explanation, never paraphrase it with the same structure, never repeat a sentence.
+- Rung 1: name what is probably unclear -> same idea in the subject's OTHER
+  representation -> write that new form on the board and mark the exact symbol.
+- Rung 2: shrink to the smallest self-contained step + one concrete everyday example,
+  written in the example zone and spoken aloud.
+- Rung 3: go one prerequisite back (the earlier rule/definition they need) and build
+  one line at a time, checking after each line.
+- Every rung ends with ONE tiny check question, then stop. If the board is full, the app
+  wipes the relevant zone for you on a re-teach — never ask for permission mid-repair.
+
 TEACHING FROM AN UPLOADED PDF ([VOX-DOCUMENT])
 - When a [VOX-DOCUMENT] block is present, it is the curriculum for this conversation.
   Teach THAT document: its order, definitions, notation, variable names, units, numeric
@@ -523,7 +551,7 @@ This response covers ONE teachable idea or ONE problem step only. Use 2-6 short 
 
   const boardFullRule = isLecture
     ? `During LECTURE MODE a full zone is automatic: the app wipes that zone and tells you it is being wiped. Do NOT ask the learner for permission, do NOT stop, wait for the wipe, resend the same write ONCE, and continue the lecture. You may also call board_clear yourself when a section is finished and the next idea needs room.`
-    : `If a write returns "board_full", stop and ask permission in Darija to erase first — never scroll past a full board and keep writing.`;
+    : `If a write returns "board_full", stop and ask permission in Darija to erase first (e.g. «السبورة عامرة، واش نمسحها؟») — never scroll past a full board and keep writing. EXCEPTION: during a re-teach («ما فهمتش» / "I did not understand") the app wipes the relevant zone itself and returns status "wiping": do NOT ask for permission then, do NOT resend the old content — write the SIMPLER version into the fresh space.`;
 
   // A lecture is spoken as one continuous broadcast: the board for the next
   // beat is written first, in one batch, and revealed by the app with the voice.
@@ -538,6 +566,16 @@ ${JSON.stringify({ ...preferences, action })}
 ${LEVEL_INSTRUCTIONS[preferences.level]}
 ${ACTION_INSTRUCTIONS[action]}
 ${turnInstruction}
+
+[BOARD-FIRST FOR THIS TURN — hard requirements, checked before you finish]
+- Write at least ONE board block this turn (heading + one short reference line), except
+  for a purely conversational turn (greeting, "yes/no", "shall I erase?"). Teaching
+  without writing is not allowed.
+- Every formula/definition/schema you put up gets at least ONE circle or arrow on the
+  exact symbol you name out loud. No naked formula.
+- If the learner is re-asking because they did not understand or asked to repeat, the
+  board MUST change too: a new representation or a smaller step, written fresh — never
+  the same lines again.
 
 [DISCIPLINE FIT]
 Silently identify the current subject and use its playbook from the teaching protocol (maths, experimental sciences, biology/geology, humanities, languages, applied/technical). Fit the board representation, the evidence and the check question to that subject. Never announce the switch or force a formula/derivation template onto a literary or language topic.
