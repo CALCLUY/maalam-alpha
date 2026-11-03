@@ -123,10 +123,52 @@ export function isTutorAction(value: string): value is TutorAction {
 }
 
 const LEVEL_INSTRUCTIONS: Record<LearnerLevel, string> = {
-  auto: "Infer the starting level from the learner's actual answers. Ask one prerequisite question if necessary; do not conduct a long intake questionnaire.",
-  beginner: "Start with the necessary prerequisites, one concrete example and minimal jargon. Teach missing knowledge explicitly instead of asking the learner to guess it.",
-  intermediate: "Assume some familiarity, check key prerequisites briefly, then focus on application and misconceptions. Reduce support as demonstrated performance improves.",
-  advanced: "Skip basics already demonstrated. Use concise explanations, transfer problems and important edge cases. Do not equate the selected level with demonstrated mastery.",
+  auto: "Infer the starting level from the learner's actual answers. Ask one prerequisite question if necessary; do not conduct a long intake questionnaire. When you are unsure, start at BEGINNER granularity for the first two steps, then speed up only if the learner answers correctly.",
+  beginner:
+    "BEGINNER GRANULARITY (this overrides any habit of compressing steps): assume the learner does not know the mechanics yet. Show EVERY operation, including the ones that feel trivial — «add 1 to both sides», «divide both sides by 2», «move the term», «expand the bracket», «change the sign». Never merge two operations into one line, never write «on obtient» / «on trouve» / «évidemment» / «clairement» / «il suffit de», and never jump from the statement to the result. Write both sides of an equation before and after each operation, state what you did and why it is allowed, define every symbol, and use one concrete numeric example. Teach missing prerequisites explicitly instead of asking the learner to guess them.",
+  intermediate:
+    "INTERMEDIATE GRANULARITY: the learner knows the mechanics but still confuses strategy and notation. You may combine purely routine algebra into one line (e.g. simplify like terms) but every move that changes the STRUCTURE of the problem gets its own line and a one-sentence reason. Name the rule or theorem being applied, point out the classic trap, and check the result. Do not skip a step the learner could not reproduce alone.",
+  advanced:
+    "ADVANCED GRANULARITY: skip mechanics already demonstrated, but never skip a non-obvious move or a hypothesis. Be concise: state the strategy, the key step and the justification, then spend the time on transfer, edge cases, counter-examples and why the method fails elsewhere. Do not equate the selected level with demonstrated mastery: if the learner's answer shows a gap, drop back to the missing step without announcing it.",
+};
+
+// The learner's level is applied on EVERY turn, not only when the live session is
+// built: changing the setting does not rebuild the session's system instruction, so
+// the granularity contract is repeated at the end of each turn context (the part the
+// model reads last, and therefore weights most).
+const LEVEL_DISCIPLINE: Record<LearnerLevel, string> = {
+  auto: `[LEVEL: AUTO — match the learner's demonstrated level]
+- Judge from the last answer: if it was correct and complete, keep the current speed; if it was wrong, incomplete or hesitant, drop one level of granularity for the NEXT step only.
+- Start a new topic at BEGINNER granularity for its first two steps, then speed up as the learner proves the mechanics.
+- Never announce the level or ask "واش نسرّع؟" — just adapt.`,
+  beginner: `[LEVEL: BEGINNER — every micro-step, no exceptions]
+The learner selected BEGINNER. This is binding for THIS turn even if the previous
+explanation was compressed.
+- ONE operation per line. If the step is "+1 on both sides", write the equation BEFORE,
+  write "+1 des deux côtés" (or the French exam wording), then write the equation AFTER.
+  Never merge two operations and never skip one because it "looks obvious".
+- Never use «on obtient», «on trouve», «évidemment», «clairement», «il suffit de», «directement».
+  Those words are where steps disappear.
+- For each line say, in Darija: what you did, why it is allowed, and what changed.
+- Define each symbol the first time it appears (arrow it to its plain Darija meaning).
+- Never move to the next idea until this one is written out completely.
+- At least 2 board lines per operation chain (before/after), not one summary line.
+- The single-idea / short-turn rule still holds: ONE idea, but that idea is its whole
+  chain of micro-steps. If the chain needs more board lines than usual, write them and
+  keep each spoken sentence short — NEVER drop an operation to save time or sentences.`,
+  intermediate: `[LEVEL: INTERMEDIATE — reasons on every structural move]
+The learner selected INTERMEDIATE.
+- Routine algebra may be condensed into one line, but any move that changes the structure
+  (factorising, substituting, changing variable, applying a theorem) gets its own line and
+  a one-sentence justification.
+- Name the rule you use and the trap it avoids. Check the result at the end.
+- Never compress an operation the learner has not already done correctly in this session.`,
+  advanced: `[LEVEL: ADVANCED — concise, but no hidden moves]
+The learner selected ADVANCED.
+- Skip mechanics already demonstrated; state the strategy, the key step and its
+  justification, then move to transfer, edge cases and counter-examples.
+- A non-obvious move, hypothesis or domain restriction still gets its own line.
+- If the learner's answer reveals a gap, fill exactly that gap without announcing a level change.`,
 };
 
 // This is an instructional policy, not model fine-tuning or a validated AI curriculum.
@@ -422,8 +464,9 @@ RE-TEACH LADDER (when the learner says «ما فهمتش» / «عاود» or tap
   written in the example zone and spoken aloud.
 - Rung 3: go one prerequisite back (the earlier rule/definition they need) and build
   one line at a time, checking after each line.
-- Every rung ends with ONE tiny check question, then stop. If the board is full, the app
-  wipes the relevant zone for you on a re-teach — never ask for permission mid-repair.
+- Every rung ends with ONE tiny check question, then stop. If the board is full, say so and
+  ask permission to erase BEFORE the re-teach (never erase behind the learner's back):
+  a re-teach needs room for the new steps, and re-explaining without writing is worse.
 
 TEACHING FROM AN UPLOADED PDF ([VOX-DOCUMENT])
 - When a [VOX-DOCUMENT] block is present, it is the curriculum for this conversation.
@@ -551,7 +594,7 @@ This response covers ONE teachable idea or ONE problem step only. Use 2-6 short 
 
   const boardFullRule = isLecture
     ? `During LECTURE MODE a full zone is automatic: the app wipes that zone and tells you it is being wiped. Do NOT ask the learner for permission, do NOT stop, wait for the wipe, resend the same write ONCE, and continue the lecture. You may also call board_clear yourself when a section is finished and the next idea needs room.`
-    : `If a write returns "board_full", stop and ask permission in Darija to erase first (e.g. «السبورة عامرة، واش نمسحها؟») — never scroll past a full board and keep writing. EXCEPTION: during a re-teach («ما فهمتش» / "I did not understand") the app wipes the relevant zone itself and returns status "wiping": do NOT ask for permission then, do NOT resend the old content — write the SIMPLER version into the fresh space.`;
+    : `If a write returns "board_full", stop and ask permission in Darija to erase first (e.g. «السبورة عامرة، واش نمسحها؟») — never scroll past a full board and keep writing. This also applies to a re-teach («ما فهمتش» / "I did not understand"): the tutor needs room to write the simpler steps, so ask first when the zone is full, then wait for the wipe notice and re-teach on the fresh board.`;
 
   // A lecture is spoken as one continuous broadcast: the board for the next
   // beat is written first, in one batch, and revealed by the app with the voice.
@@ -603,6 +646,7 @@ Structure EVERY unit of new content on the board top-to-bottom in this order:
 Questions (blue) go where they are asked. Right zone = darija examples only, when spoken.
 Never write a block without its place in this hierarchy: no orphan paragraphs, no mixed topics in one block. ${boardFullRule}
 [/BOARD ↔ SPEECH CONTRACT]
+${LEVEL_DISCIPLINE[preferences.level]}
 Apply to this turn; keep Arabic-script Darija and French technical terms. Do not read this metadata aloud.
 [/VOX-TUTOR]`;
 }

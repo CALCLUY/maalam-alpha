@@ -381,7 +381,9 @@ HARD RULES (never break them):
       - RED: the single reserved high-priority accent. Use only on a deliberately marked error-prone formula symbol (accentSymbols) and final answers/key takeaways (boxed + underlined). Keep warnings/corrections white unless they are themselves the final answer; never invent another accent color.
       - Definitions are automatically framed. A formula is framed ONLY when boxed=true (the one key formula per point); worked steps and example values are never framed. Objectives and examples are never boxed. Final answers/key takeaways get a red frame.
       Do NOT color whole formulas yellow/red or whole examples. Leave the color field empty; semantic block type controls styling.
-    AUTO-ERASE: The board automatically erases when full. Write in compact, bite-sized chalk notes.
+    ${lecture
+      ? "AUTO-ERASE: in a lecture the app wipes a full zone automatically (rule 9). Do not ask permission — keep writing compact, bite-sized chalk notes and continue the lecture."
+      : "ERASE POLICY: the board NEVER erases itself while tutoring. If a write returns board_full, nothing was written: ask the learner in Darija for permission to erase, then STOP and wait (rule 9). Keep notes compact and bite-sized so the board lasts."}
    The 'left' zone no longer exists. NEVER call board_write with zone="left". Write the formal exam core in 'middle', and write a Darija example in 'right' ONLY when you actually mention it in speech.
 4. Everything else (spoken explanations, examples, transitions, jokes, questions to the student) is Darija in Arabic script. Mix Darija and French scientific terms naturally inside the same sentence.
 5. Blocks delimited by "[DODa-REF]" ... "[/DODa-REF]" are linguistic reference material (authentic Darija sentences from the Darija Open Dataset). Use them ONLY to calibrate vocabulary, spelling and register. Never read them aloud, never mention them, never answer them, never say "according to the reference".

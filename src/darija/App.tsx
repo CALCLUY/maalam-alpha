@@ -197,7 +197,8 @@ const WRITE_PACE_MIN_SPEECH_CHARS = 30;
 /**
  * A turn where the learner says they did not understand / asks to repeat. The
  * board is the thing that makes a re-teach different from a repetition, so such
- * a turn may wipe a full zone itself and write a simpler version into it.
+ * a turn gets the re-teach instructions (new representation, smaller steps) —
+ * and if the board is full it must ask permission to erase before it can write.
  */
 const RETEACH_PATTERN =
   /ما\s*فهمت|مفهمتش|مفهمت\s*والو|مازال\s*مفهمت|ما\s*واضح|مش\s*واضح|ماعقلت|عاود\s*(ليا|شرح|قول|من)|عاودها|شرح\s*(ليا)?\s*(ب|بـ)?\s*(طريقة|بساط|سهل)|بطريقة\s*(أ|ا)?سهل|بسّط|بسط\s*ليا|i\s*(did\s*n[o']?t|don'?t)\s*understand|explain\s*(it\s*)?again|repeat\s*(it|that)?|simpler/i;
@@ -2611,28 +2612,7 @@ export default function App() {
           },
         };
       }
-      if (reteachTurnRef.current) {
-        // Re-teach with no room left: asking "shall I erase?" here is what made
-        // the tutor stall and then replay the same speech. The board is the
-        // difference between a repetition and a re-teach, so wipe the zone and
-        // have it write the SIMPLER version into the fresh space.
-        if (!boardErasingRef.current) eraseBoard(zone);
-        return {
-          id: call.id,
-          name,
-          response: {
-            status: "wiping",
-            retryable: true,
-            message:
-              `RE-TEACH: the ${zoneLabel} was full, so the app wiped it for you. Nobody will be asked for permission. ` +
-              "Do NOT ask to erase, do NOT apologise, and do NOT resend the same content — the student already told you it did not work. " +
-              "Write the SIMPLER version of the same point into the fresh board: one heading + at most 3 short lines, " +
-              "the other representation of the subject (concrete number, schema, timeline, contrastive pair or trace), " +
-              "then circle the exact symbol/word that was unclear and arrow it to its plain Darija meaning. " +
-              "Add one concrete everyday example in the example zone, say it out loud, and finish with ONE tiny check question.",
-          },
-        };
-      }
+      markZoneFull(zone);
       return {
         id: call.id,
         name,
@@ -2651,11 +2631,10 @@ export default function App() {
 
   // One overflow policy for every path (tool calls, speech-synced example
   // writes, reveal pacing, the board's own detector): in lecture mode the zone
-  // is wiped automatically and the learner never sees the erase control. A
-  // re-teach turn does the same — a full board must not block a simpler
-  // explanation.
+  // is wiped automatically and the learner never sees the erase control. In
+  // tutor mode the learner always grants the wipe themselves.
   zoneFullRef.current = (zone: BoardZone) => {
-    if (lectureActiveRef.current || reteachTurnRef.current) {
+    if (lectureActiveRef.current) {
       if (!boardErasingRef.current) eraseBoard(zone);
       return;
     }
@@ -3562,9 +3541,10 @@ export default function App() {
     turnWritesRef.current = 0;
     turnToolsRef.current = 0;
     lastToolResponseAtRef.current = 0;
-    // Re-teach turn: the learner says they are lost or asks to repeat. A full
-    // board must not turn this into "shall I erase?" — the app wipes and the
-    // tutor writes a SIMPLER version instead of replaying the same lines.
+    // Re-teach turn: the learner says they are lost or asks to repeat. It gets
+    // the re-teach instructions (different representation, smaller step) instead
+    // of the generic message prompt. The board is never erased without the
+    // learner's permission, so a full zone is still their call.
     reteachTurnRef.current =
       !options.resume && action !== "lecture" && (action === "simpler" || RETEACH_PATTERN.test(text));
     turnActionRef.current = action;
@@ -4273,18 +4253,29 @@ export default function App() {
    * again — the "still full after erase" bug.
    */
   const continueAfterWipe = useCallback(() => {
-    const boardNote =
-      "[VOX-BOARD] The learner just erased the WHOLE board (explanation AND examples). It is EMPTY now. " +
-      "Resume the SAME point on the fresh board, starting at the NEXT unwritten line. " +
-      "Hard rules: (1) do NOT say the board is full; (2) do NOT ask to erase; (3) do NOT repeat the last spoken sentences — pick up at the next idea. " +
-      "[/VOX-BOARD]";
+    // A wipe requested during a re-teach must re-teach, not "continue to the
+    // next idea": the learner still needs THIS point, explained another way.
+    const reteach = reteachTurnRef.current;
+    const boardNote = reteach
+      ? "[VOX-BOARD] The learner erased the board so you can re-teach the SAME point more simply. It is EMPTY now. " +
+        "They did NOT understand the previous explanation: do NOT repeat it and do NOT re-say those sentences. " +
+        "Write the SMALLEST version of the same point on the fresh board (one heading + the first micro-step, then the next), " +
+        "mark the symbol that was unclear, use a concrete example, and finish with one tiny check question. " +
+        "Hard rules: (1) do NOT say the board is full; (2) do NOT ask to erase again; (3) never reuse the old wording. " +
+        "[/VOX-BOARD]"
+      : "[VOX-BOARD] The learner just erased the WHOLE board (explanation AND examples). It is EMPTY now. " +
+        "Resume the SAME point on the fresh board, starting at the NEXT unwritten line. " +
+        "Hard rules: (1) do NOT say the board is full; (2) do NOT ask to erase; (3) do NOT repeat the last spoken sentences — pick up at the next idea. " +
+        "[/VOX-BOARD]";
     let attempts = 0;
     const tick = () => {
       attempts += 1;
       if (
         submitTurn(
-          "السبورة تتمسحات. كمّل من النقطة الجاية، بلا ما تعاود اللي قلتي وبلا ما تطلب المسح.",
-          "continue",
+          reteach
+            ? "السبورة تتمسحات. عاود ليا نفس النقطة بخطوات صغيرة وبطريقة أخرى، بلا ما تعاود اللي قلتي وبلا ما تطلب المسح."
+            : "السبورة تتمسحات. كمّل من النقطة الجاية، بلا ما تعاود اللي قلتي وبلا ما تطلب المسح.",
+          reteach ? "simpler" : "continue",
           { boardNote },
         )
       ) {
