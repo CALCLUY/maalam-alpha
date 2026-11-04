@@ -177,6 +177,46 @@ The learner selected ADVANCED.
 - If the learner's answer reveals a gap, fill exactly that gap without announcing a level change.`,
 };
 
+// A diagram is the right representation for spatial/structural ideas. The board
+// accepts raw SVG, so the model gets an exact recipe and a few templates instead
+// of guessing markup that the sanitizer would drop.
+const DIAGRAM_PLAYBOOK = `[DIAGRAMS — draw when the idea is spatial, structural or procedural]
+Use board_write(zone="middle", type="svg", content="<svg …>…</svg>") when the idea is:
+- spatial: geometry, vectors, forces, fields, optics, a graph on axes;
+- structural: a cell, a circuit, a molecule, an organ, a labelled schema;
+- procedural: a flowchart, an algorithm, a timeline, cause → effect, a cycle.
+Do NOT draw for a plain equation, a definition or a list of steps: write those as
+formula/definition/text. One diagram per idea, right after its heading and before the
+steps; then speak what it shows (axes, boxes, arrows), never the SVG code.
+
+STRICT SVG RECIPE (malformed or unsupported markup is dropped and nothing appears):
+- Root exactly: <svg viewBox="0 0 520 200"> … </svg>. No width/height, no <style>,
+  no <image>, no <foreignObject>, no external fonts, no script/event attributes.
+- Geometry: stroke="currentColor" stroke-width="2" fill="none"
+  stroke-linecap="round" stroke-linejoin="round" on the root; text labels get
+  fill="currentColor" stroke="none" font-size="14".
+- Allowed elements: g, path, line, polyline, polygon, rect, circle, ellipse, text,
+  tspan, defs, marker. Group one object per <g>.
+- Arrowhead: end the line with a small filled <polygon> or a two-line <path>; do not
+  rely on marker references.
+- Labels: 2-4 French words, font-size 13-15, placed beside the object (not across a
+  line). Keep a 20 px margin; align boxes on a grid; leave space between labels.
+- 6-14 elements maximum. Wide layout (left → right or bottom → top), one screen wide.
+- White chalk only: never set a page/background colour; let the board colour the SVG.
+
+TEMPLATES (adapt the numbers; do not copy blindly):
+- Axes: x-axis (60,170)→(480,170) and y-axis (60,170)→(60,30), both with an arrowhead;
+  label "x" / "y"; the curve as one <path d="M … C …">; circle the key point.
+- Flow: 2-4 <rect> boxes at equal x steps, one arrow between neighbours, a short label
+  above each arrow, start/end as a small circle.
+- Geometry: the figure centred, vertices labelled A/B/C, the right angle as a small
+  square, side lengths beside the sides, the asked angle as an arc.
+- Schema: a big labelled outline (cell/circuit/organ) plus 3-5 leader lines to short
+  labels; fill="none" so the chalk outline stays clean.
+
+Put every label and arrow INSIDE the SVG (board_annotate targets text blocks, not SVG
+shapes). In speech, point at one part ("هاد الضلع…", "هاد السهم…") so eyes and ears meet.`;
+
 // This is an instructional policy, not model fine-tuning or a validated AI curriculum.
 const TEACHING_PROTOCOL = `
 === EVIDENCE-INFORMED TEACHING: GUIDED MASTERY ===
@@ -580,11 +620,11 @@ END OF THE LECTURE:
 `;
 
 export function buildLectureInstruction(preferences: TeachingPreferences): string {
-  return `${LECTURE_PROTOCOL}\nInitial app preferences: ${JSON.stringify(preferences)}\n${LEVEL_INSTRUCTIONS[preferences.level]}\n`;
+  return `${LECTURE_PROTOCOL}\n${DIAGRAM_PLAYBOOK}\nInitial app preferences: ${JSON.stringify(preferences)}\n${LEVEL_INSTRUCTIONS[preferences.level]}\n`;
 }
 
 export function buildTeachingInstruction(preferences: TeachingPreferences): string {
-  return `${TEACHING_PROTOCOL}\nInitial app preferences: ${JSON.stringify(preferences)}\n${LEVEL_INSTRUCTIONS[preferences.level]}\n`;
+  return `${TEACHING_PROTOCOL}\n${DIAGRAM_PLAYBOOK}\nInitial app preferences: ${JSON.stringify(preferences)}\n${LEVEL_INSTRUCTIONS[preferences.level]}\n`;
 }
 
 export type TutorTurnOptions = {
@@ -684,6 +724,8 @@ ${beginnerStart}${previousExplanation}
 - If the learner is re-asking because they did not understand or asked to repeat, the
   board MUST change too: a new representation or a smaller step, written fresh — never
   the same lines again.
+
+${DIAGRAM_PLAYBOOK}
 
 [DISCIPLINE FIT]
 Silently identify the current subject and use its playbook from the teaching protocol (maths, experimental sciences, biology/geology, humanities, languages, applied/technical). Fit the board representation, the evidence and the check question to that subject. Never announce the switch or force a formula/derivation template onto a literary or language topic.

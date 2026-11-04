@@ -108,6 +108,7 @@ import {
   pruneConnectors,
   replaceZone,
   sanitizeBoardWriteText,
+  sanitizeSvgMarkup,
   zoneHasRoomFor,
   type BoardBlock,
   type BoardConnector,
@@ -2822,6 +2823,33 @@ export default function App() {
         const isFormalZone = args.zone !== "right" && args.type !== "example";
         const rightZone = isExampleWrite(args) && !isFormalZone;
         const formalArgs = isFormalZone ? { ...args, zone: "middle" } : args;
+        // Diagrams are generated markup, so validate them BEFORE the board sees
+        // them: malformed or unsupported SVG renders as an empty gap, which is
+        // worse than no diagram. The rejection carries the exact recipe so the
+        // model can repair it in one retry.
+        if (isFormalZone && formalArgs.type === "svg") {
+          const rawSvg = typeof formalArgs.content === "string" ? formalArgs.content : "";
+          const cleanSvg = sanitizeSvgMarkup(rawSvg);
+          if (!cleanSvg) {
+            return {
+              id: call.id,
+              name,
+              response: {
+                status: "rejected",
+                retryable: true,
+                message:
+                  "SVG DIAGRAM REJECTED: the markup is empty, malformed or uses unsupported elements, so nothing would appear. " +
+                  "Resend it ONCE as ONE self-contained drawing: " +
+                  "<svg viewBox=\"0 0 520 200\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"> … </svg>. " +
+                  "Allowed elements: g, path, line, polyline, polygon, rect, circle, ellipse, text, tspan, defs, marker. " +
+                  "No <style>, <image>, <foreignObject>, script, width/height, external fonts or event attributes. " +
+                  "Labels: <text fill=\"currentColor\" stroke=\"none\" font-size=\"14\">Mot court</text>; 6-14 elements; keep labels inside a 20 px margin. " +
+                  "If a clean diagram is not possible, write the same idea as formula/text instead — do not retry more than once.",
+              },
+            };
+          }
+          formalArgs.content = cleanSvg;
+        }
         if (rightZone) {
           const writeArgs = normalizeBoardWriteMath({ ...args, zone: "right" });
           // The right zone is examples only — never a dumping ground for speech.

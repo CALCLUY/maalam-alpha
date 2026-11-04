@@ -1707,7 +1707,7 @@ input[type="radio"]:focus-visible {
 .board-svg svg {
   width: 100%;
   height: auto;
-  max-height: 160px;
+  max-height: 220px;
   color: inherit;
 }
 
@@ -2192,7 +2192,7 @@ input[type="radio"]:focus-visible {
 }
 
 .board-svg svg {
-  max-height: 14cqw;
+  max-height: 20cqw;
 }
 
 /* ------------------------------------------------------------------------ */

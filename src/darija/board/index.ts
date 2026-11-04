@@ -32,6 +32,7 @@ export {
   sanitizeBoardWriteText,
 } from "./guard";
 export type { BoardBlock, BoardBlockType, BoardZone, ChalkColor } from "./types";
+export { sanitizeSvgMarkup } from "./sanitizeSvg";
 export { applyBoardAnnotate, MAX_ACTIVE_ARROWS } from "./annotate";
 export { playChalkEraseSound } from "./chalkAudio";
 export {
