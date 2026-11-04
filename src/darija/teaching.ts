@@ -125,7 +125,7 @@ export function isTutorAction(value: string): value is TutorAction {
 const LEVEL_INSTRUCTIONS: Record<LearnerLevel, string> = {
   auto: "Infer the starting level from the learner's actual answers. Ask one prerequisite question if necessary; do not conduct a long intake questionnaire. When you are unsure, start at BEGINNER granularity for the first two steps, then speed up only if the learner answers correctly.",
   beginner:
-    "BEGINNER GRANULARITY (this overrides any habit of compressing steps): assume the learner does not know the mechanics yet. Show EVERY operation, including the ones that feel trivial — «add 1 to both sides», «divide both sides by 2», «move the term», «expand the bracket», «change the sign». Never merge two operations into one line, never write «on obtient» / «on trouve» / «évidemment» / «clairement» / «il suffit de», and never jump from the statement to the result. Write both sides of an equation before and after each operation, state what you did and why it is allowed, define every symbol, and use one concrete numeric example. Teach missing prerequisites explicitly instead of asking the learner to guess them.",
+    "BEGINNER GRANULARITY (this overrides any habit of compressing steps): this learner is NOT expected to know the floor of the topic. Do not open with the question's own formula or definition: first name the ONE prerequisite it assumes and teach that prerequisite with a concrete number or daily-life situation, then connect it to the question. Show EVERY operation, including the ones that feel trivial — «add 1 to both sides», «divide both sides by 2», «move the term», «expand the bracket», «change the sign». Never merge two operations into one line, never write «on obtient» / «on trouve» / «évidemment» / «clairement» / «il suffit de», and never jump from the statement to the result. Write both sides of an equation before and after each operation, state what you did and why it is allowed, define every symbol, and use one concrete numeric example. Teach missing prerequisites explicitly instead of asking the learner to guess them.",
   intermediate:
     "INTERMEDIATE GRANULARITY: the learner knows the mechanics but still confuses strategy and notation. You may combine purely routine algebra into one line (e.g. simplify like terms) but every move that changes the STRUCTURE of the problem gets its own line and a one-sentence reason. Name the rule or theorem being applied, point out the classic trap, and check the result. Do not skip a step the learner could not reproduce alone.",
   advanced:
@@ -155,7 +155,13 @@ explanation was compressed.
 - At least 2 board lines per operation chain (before/after), not one summary line.
 - The single-idea / short-turn rule still holds: ONE idea, but that idea is its whole
   chain of micro-steps. If the chain needs more board lines than usual, write them and
-  keep each spoken sentence short — NEVER drop an operation to save time or sentences.`,
+  keep each spoken sentence short — NEVER drop an operation to save time or sentences.
+- DO NOT START AT THE ASKED QUESTION. A beginner gets the floor UNDER it first: name the
+  one prerequisite the question assumes, teach that prerequisite with a concrete number
+  or a daily-life situation, and only then connect it to the question. Starting with the
+  final formula/definition of the asked topic is the exact failure this level prevents.
+- If the learner's question is already the most basic form, do not invent a prerequisite:
+  do its first micro-step, but say in one line what it builds on.`,
   intermediate: `[LEVEL: INTERMEDIATE — reasons on every structural move]
 The learner selected INTERMEDIATE.
 - Routine algebra may be condensed into one line, but any move that changes the structure
@@ -581,16 +587,25 @@ export function buildTeachingInstruction(preferences: TeachingPreferences): stri
   return `${TEACHING_PROTOCOL}\nInitial app preferences: ${JSON.stringify(preferences)}\n${LEVEL_INSTRUCTIONS[preferences.level]}\n`;
 }
 
+export type TutorTurnOptions = {
+  /**
+   * What the learner already heard on the point they are asking to repeat.
+   * Provided only on a re-teach turn: the model must not reuse it.
+   */
+  previousExplanation?: string;
+};
+
 export function buildTutorTurnContext(
   preferences: TeachingPreferences,
   action: TutorAction = "message",
+  options: TutorTurnOptions = {},
 ): string {
   const isLecture = action === "lecture";
   const turnInstruction = isLecture
     ? `[CONTINUOUS LECTURE FLOW]
 This response is ONE segment of a recorded explainer lecture. The one-idea / 3-7 sentence / hard-stop turn discipline from the teaching protocol is SUSPENDED for this turn. Tell it as ONE continuing story (hook -> problem -> idea -> worked example -> twist), never as a list of definitions: pick up the narrative thread exactly where it stopped, move it forward, explain WHY the idea works, land it with a concrete example or a daily-life analogy, and flow into the next beat while time remains. NEVER repeat a sentence from the previous segment — especially not its last sentence as an opening bridge: that sentence is finished, start with the next one. Do NOT ask the learner any question, do not wait for an answer, do not use ask_interactive, and do not write a question block. Never say "واش فهمتي؟", "قولي ليا", "نجربو", or ask the learner to do anything. If you finish a point, start the next one yourself. Do not say goodbye or announce that another segment will follow — bridge into the next idea instead.`
     : `[SINGLE IDEA + HARD STOP]
-This response covers ONE teachable idea or ONE problem step only. Use 2-6 short spoken sentences in ONE continuous audio stretch, then STOP and wait. Never resume with a second speech burst after a board tool. Never repeat a sentence you already said in this turn or the previous one — if it is already spoken, move on. If you ask a question, it is the final sentence — do not answer it, summarize, or keep explaining.`;
+This response covers ONE teachable idea or ONE problem step only. Put its board batch (and marks) up FIRST, then speak the idea in 2-6 short sentences as ONE continuous audio stretch, then STOP and wait. Do NOT interleave board writes inside the spoken stretch — that is what makes the answer stop and restart. Never repeat a sentence you already said in this turn or the previous one — if it is already spoken, move on. If you ask a question, it is the final sentence — do not answer it, summarize, or keep explaining.`;
 
   const boardFullRule = isLecture
     ? `During LECTURE MODE a full zone is automatic: the app wipes that zone and tells you it is being wiped. Do NOT ask the learner for permission, do NOT stop, wait for the wipe, resend the same write ONCE, and continue the lecture. You may also call board_clear yourself when a section is finished and the next idea needs room.`
@@ -598,18 +613,68 @@ This response covers ONE teachable idea or ONE problem step only. Use 2-6 short 
 
   // A lecture is spoken as one continuous broadcast: the board for the next
   // beat is written first, in one batch, and revealed by the app with the voice.
-  // The interactive "always speak between writes" rule is what made the model
-  // interleave tools inside a sentence and chop the audio.
+  // The same batch-first shape is now correct for tutoring too: every write is
+  // held by the app until the voice reaches its words, so interleaving tool calls
+  // inside the explanation only chopped the audio ("it stops, then continues").
   const boardTimingRule = isLecture
     ? `- TIMING IS THE WHOLE POINT. Put ALL the formal lines for the coming beat (at most 3-5 short lines) on the board in ONE batch BEFORE you start speaking; the app reveals each line only when your voice reaches it, so nothing appears before it is heard. Then speak the whole beat in one unbroken stretch. Never interleave board writes between spoken sentences, never pause for a tool result, and never stack a second speech burst after a write.`
-    : `- TIMING IS THE WHOLE POINT. Write the line FIRST, then speak the 2-3 sentences that explain exactly that line. Then annotate the exact symbol you are naming, and say its name as the mark is drawn. The student should see a mark appear at the moment they hear its meaning — nothing earlier (confusing) and nothing later (too late to connect). NEVER stack writes in silence: after 3 board_write calls in one response without speaking between them, further writes are refused until you speak — so always speak between writes, starting from the very first line.`;
+    : `- TIMING IS THE WHOLE POINT. Put the formal lines AND their marks on the board in ONE batch BEFORE you start speaking (at most 3-5 short lines for this one idea); the app holds every line until your voice reaches its words, so batching never writes ahead. Then speak the whole explanation as ONE continuous audio stretch that mentions each line in order. Do NOT interleave board writes between spoken sentences and do NOT stop mid-answer for a tool result — that is what makes the answer stop and start again.`;
+
+  const startsNewContent =
+    action === "message" ||
+    action === "doc_start" ||
+    action === "doc_lesson" ||
+    action === "practice" ||
+    action === "simpler";
+  // The setting is only a label unless the OPENING move changes too. At beginner
+  // level the failure the learner reports is not "too fast" but "it never gave me
+  // the floor": the model answers the asked question straight away. This block
+  // replaces that opening move on every content turn.
+  const beginnerStart =
+    !isLecture && preferences.level === "beginner" && startsNewContent
+      ? `
+[BEGINNER START — the first move, before the learner's actual question]
+- Apply this ONLY when the turn OPENS a topic (the learner asks about something not
+  already being taught in this conversation). On a follow-up to the current point, skip
+  this block and do the next micro-step instead — never restart prerequisites.
+- Do NOT open with the asked question's formula/definition/result. First give the floor
+  it stands on: name the ONE prerequisite the question assumes and write it as the first
+  board heading (e.g. "Prérequis : …").
+- Teach that prerequisite in the smallest possible way: one concrete number or a
+  daily-life situation, one operation per line, before touching the question.
+- Only after that, connect the prerequisite to the asked question in ONE sentence, and
+  stop this turn. Do not solve the asked question in the same turn unless the question
+  itself is the prerequisite-level step.
+- If the question is already the most basic form, do not invent a prerequisite: say in
+  one line what it builds on, then do its first micro-step.
+`
+      : "";
+  // A re-teach is judged against what the learner already rejected. Without this
+  // the model sees only the same history and naturally paraphrases itself; with
+  // it, the banned text is explicit and the required new shape is explicit too.
+  const previousExplanation = !isLecture && options.previousExplanation?.trim()
+    ? `
+[PREVIOUS EXPLANATION — ALREADY HEARD AND REJECTED]
+"""${options.previousExplanation.trim().slice(0, 1400)}"""
+- This is the explanation the learner says did not work. Do NOT repeat it, do not
+  paraphrase it with the same structure, and do not reuse its examples, analogy or
+  board lines. A reused sentence is a failed re-teach.
+- Switch the REPRESENTATION: if it was symbolic, use a concrete number + a small table;
+  if it was verbal, use a labelled schema/diagram or a timeline; if it used an example,
+  use a counter-example or a short daily-life story; if it was a long derivation, shrink
+  to the FIRST micro-step only.
+- Start a NEW heading on the board (never append under the old explanation) and keep it
+  to one heading + at most 3 short lines, plus one example in the right zone.
+[/PREVIOUS EXPLANATION]
+`
+    : "";
 
   return `[VOX-TUTOR]
 ${JSON.stringify({ ...preferences, action })}
 ${LEVEL_INSTRUCTIONS[preferences.level]}
 ${ACTION_INSTRUCTIONS[action]}
 ${turnInstruction}
-
+${beginnerStart}${previousExplanation}
 [BOARD-FIRST FOR THIS TURN — hard requirements, checked before you finish]
 - Write at least ONE board block this turn (heading + one short reference line), except
   for a purely conversational turn (greeting, "yes/no", "shall I erase?"). Teaching

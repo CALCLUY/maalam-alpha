@@ -188,11 +188,13 @@ const SPEECH_CHARS_PER_SECOND = 12;
  */
 const SPEECH_REVEAL_LAG_SECONDS = 0.5;
 /**
- * Speech pacing for board writes: the tutor may stack a few lines while
- * starting an idea, but past that it MUST speak between writes — otherwise the
- * student hears silence while the board silently fills up and hits board_full.
+ * Speech pacing for board writes: the tutor batches the lines for one idea at
+ * the start of the turn (the app holds every line until the voice reaches its
+ * words), then speaks the idea in one stretch. The cap only stops a runaway
+ * "fill the whole board in silence" burst. Forcing a write/speak alternation
+ * after the first line is what made the answer stop and restart mid-explanation.
  */
-const WRITE_PACE_FREE_WRITES = 1;
+const WRITE_PACE_FREE_WRITES = 6;
 const WRITE_PACE_MIN_SPEECH_CHARS = 30;
 /**
  * A turn where the learner says they did not understand / asks to repeat. The
@@ -274,6 +276,50 @@ function collapseRepeatedSentences(text: string): string {
 }
 
 /**
+ * Char-trigram Jaccard similarity. Used only to catch a re-teach that recycles
+ * the explanation the learner just rejected (near-verbatim sentences), not to
+ * judge teaching quality: sharing a technical term must not count as a repeat.
+ */
+function trigramSet(text: string): Set<string> {
+  const normalized = normalizeTranscriptSentence(text).toLowerCase();
+  const grams = new Set<string>();
+  for (let index = 0; index + 3 <= normalized.length; index++) {
+    grams.add(normalized.slice(index, index + 3));
+  }
+  return grams;
+}
+
+function sentenceSimilarity(a: string, b: string): number {
+  const left = trigramSet(a);
+  const right = trigramSet(b);
+  if (!left.size || !right.size) return 0;
+  let shared = 0;
+  for (const gram of left) if (right.has(gram)) shared += 1;
+  return shared / (left.size + right.size - shared);
+}
+
+/**
+ * Fraction of the new explanation's sentences that are near-copies of a
+ * sentence from the rejected one. >= 0.35 is treated as "it repeated itself".
+ */
+function repeatedExplanationRatio(previous: string, next: string): number {
+  const prior = splitTranscriptSentences(previous)
+    .map(normalizeTranscriptSentence)
+    .filter((sentence) => sentence.length >= 24);
+  const fresh = splitTranscriptSentences(next)
+    .map(normalizeTranscriptSentence)
+    .filter((sentence) => sentence.length >= 24);
+  if (!prior.length || !fresh.length) return 0;
+  let repeated = 0;
+  for (const sentence of fresh) {
+    if (prior.some((older) => sentenceSimilarity(older, sentence) >= 0.7)) {
+      repeated += 1;
+    }
+  }
+  return repeated / fresh.length;
+}
+
+/**
  * Appends a Live transcription chunk without doubling overlaps. The API
  * sometimes re-sends the tail of what it already sent (or the model repeats
  * its own sentence), which used to print every question twice in the chat.
@@ -349,14 +395,17 @@ type SubmitTurnOptions = {
   appendTo?: string;
   /** True for an automatic continuation, never for a learner turn. */
   resume?: boolean;
+  /** True when this re-teach turn continues one that waited for board permission:
+   *  keep the explanation captured before the permission question. */
+  reteachContinuation?: boolean;
 };
 
-const RESPONSE_WATCHDOG_MS = 15_000;
+const RESPONSE_WATCHDOG_MS = 22_000;
 /** Once a turn has spoken, it is cut only after the buffered voice has drained
- *  and the server has stayed silent for this long. The old 9 s limit fired while
- *  several seconds of speech were still queued, so the continuation overlapped
- *  the tail and the learner heard the same sentence twice. */
-const RESPONSE_STALL_AFTER_AUDIO_MS = 12_000;
+ *  and the server has stayed silent for this long. Board-first turns plan a
+ *  whole batch of lines before the next speech burst, so a short limit (12 s)
+ *  cut healthy turns and produced the "it stops, then continues" loop. */
+const RESPONSE_STALL_AFTER_AUDIO_MS = 18_000;
 /** A lecture may take longer to produce its first frame (heavy PDF/image context
  *  or a tool-planning turn). Rebuilding the socket during that wait was the main
  *  cause of the reconnect loop: the app killed a healthy session, then the next
@@ -1246,12 +1295,22 @@ export default function App() {
   const pendingRevealsRef = useRef<PendingReveal[]>([]);
   const lastRevealRef = useRef<{ at: number; transcriptLen: number }>({ at: 0, transcriptLen: 0 });
   const lastTranscriptRef = useRef("");
+  /** The last SUBSTANTIVE teaching answer (not a short "shall I erase?" turn).
+   *  Used as the "already heard" text when the learner asks to repeat. */
+  const lastTeachingTextRef = useRef("");
   /** True while the chalk-wipe animation is playing (board content is stale). */
   const boardErasingRef = useRef(false);
   /** After a full wipe, ignore "board full" and tell the tutor the slate is empty. */
   const justErasedRef = useRef(false);
   /** True while the current learner turn is a re-teach ("I did not understand" / "repeat"). */
   const reteachTurnRef = useRef(false);
+  /** The explanation the learner rejected on the current re-teach. Kept across
+   *  the board-permission turn so the repaired answer is judged against it. */
+  const priorExplanationRef = useRef("");
+  /** The user turn a "you repeated the same explanation" nudge was sent for. */
+  const lastReteachNudgeSeqRef = useRef(-1);
+  /** What the live session's system instruction was actually built with. */
+  const sessionPrefsRef = useRef<TeachingPreferences | null>(null);
 
   /* Zones that are out of room. Nothing is EVER erased to make space: the board
      keeps exactly what the learner was shown and asks for permission instead. */
@@ -2311,6 +2370,11 @@ export default function App() {
         // while an interrupted answer's buffered tail is still playing) can be
         // matched against what was actually said.
         lastTranscriptRef.current = text;
+        // Keep the last real explanation separately: a short "the board is full,
+        // may I erase?" turn must never replace it as the text to re-teach from.
+        if (text.length >= 120 && BOARD_EXPECTED_ACTIONS.has(turnActionRef.current)) {
+          lastTeachingTextRef.current = text;
+        }
       }
       if (!interrupted && text) {
         flushSpokenExamples();
@@ -2353,6 +2417,20 @@ export default function App() {
       }
     }
 
+    // A re-teach that is a near-copy of the explanation the learner rejected is
+    // the failure they explicitly report ("it repeats the same speech"). Compute
+    // it BEFORE the other nudges so only ONE corrective turn is sent, and the
+    // repetition repair wins over the board/silence nudges.
+    const repeatedReteach =
+      !interrupted &&
+      !lectureActiveRef.current &&
+      Boolean(text) &&
+      reteachTurnRef.current &&
+      Boolean(priorExplanationRef.current) &&
+      lastReteachNudgeSeqRef.current !== turnSeqRef.current
+        ? repeatedExplanationRatio(priorExplanationRef.current, text)
+        : 0;
+
     // The turn did things on the board but produced ZERO speech: the student
     // heard complete silence while writing appeared. Force one spoken catch-up
     // turn (at most one nudge per learner turn, so this can never loop).
@@ -2361,6 +2439,7 @@ export default function App() {
       !lectureActiveRef.current &&
       !text &&
       audioChunks.length === 0 &&
+      repeatedReteach < 0.35 &&
       (turnWritesRef.current > 0 || turnToolsRef.current > 0) &&
       lastSpeechNudgeSeqRef.current !== turnSeqRef.current &&
       sessionRef.current
@@ -2393,6 +2472,7 @@ export default function App() {
       !lectureActiveRef.current &&
       text.length >= 120 &&
       turnWritesRef.current === 0 &&
+      repeatedReteach < 0.35 &&
       BOARD_EXPECTED_ACTIONS.has(turnActionRef.current) &&
       lastBoardNudgeSeqRef.current !== turnSeqRef.current &&
       sessionRef.current
@@ -2400,10 +2480,33 @@ export default function App() {
       lastBoardNudgeSeqRef.current = turnSeqRef.current;
       const nudge =
         "[VOX-DIRECTOR] You just explained without writing ANYTHING on the board — the learner has only your voice to hold on to and nothing to reread or point at. " +
-        "Do NOT repeat the explanation and do NOT re-say what you already said. Write the reference for the idea you just explained, compactly: " +
-        "one heading plus 1-3 short lines (formal French, exam notation), circle or arrow the one symbol/word that carries the point, " +
-        "and add one concrete example in the example zone if the idea needs it. In the same response say ONE short Darija sentence per line (the why, not a reading), " +
-        "so each line appears with your voice. Then stop. [/VOX-DIRECTOR]";
+        "The explanation is FINISHED: do NOT speak in this response and do NOT re-say what you already said. " +
+        "Write ONLY the reference for the idea you just explained, compactly: one heading plus 1-3 short lines (formal French, exam notation), " +
+        "circle or arrow the one symbol/word that carries the point, and add one concrete example in the example zone if the idea needs it. " +
+        "Output no audio at all: board writes only, then stop. [/VOX-DIRECTOR]";
+      try {
+        lastClientSendAtRef.current = Date.now();
+        sessionRef.current.sendClientContent({
+          turns: [{ role: "user", parts: [{ text: nudge }] }],
+          turnComplete: true,
+        });
+      } catch {
+        // The session is gone; nothing to resume.
+      }
+    }
+
+    // A re-teach that is a near-copy of the explanation the learner rejected is
+    // the failure they explicitly report ("it repeats the same speech"). One
+    // corrective turn, once per learner turn, names the repetition and demands a
+    // different representation — it never loops.
+    if (repeatedReteach >= 0.35 && sessionRef.current) {
+      lastReteachNudgeSeqRef.current = turnSeqRef.current;
+      const nudge =
+        `[VOX-DIRECTOR] You just repeated the explanation the learner rejected: ${Math.round(repeatedReteach * 100)}% of your sentences overlap the one they said they did not understand. ` +
+        "Do NOT say those sentences again and do NOT paraphrase them. Re-teach the SAME point in a DIFFERENT shape, starting from the smallest piece: " +
+        "if the rejected version was symbolic, use one concrete number and a 2-row table; if it was verbal, use a labelled schema or a tiny timeline; if it used an example, use a counter-example or a short daily-life story. " +
+        "Start a NEW board heading (never append under the old one), keep it to one heading + at most 3 short lines, circle the exact symbol/word that is unclear, and finish with one tiny check question. " +
+        "Do not ask to erase. [/VOX-DIRECTOR]";
       try {
         lastClientSendAtRef.current = Date.now();
         sessionRef.current.sendClientContent({
@@ -2679,12 +2782,13 @@ export default function App() {
             },
           };
         }
-        // Speech pacing: a few stacked lines are fine while starting an idea,
-        // but past that the tutor MUST speak between writes. Silent write
-        // bursts leave the student hearing nothing while the board fills up
-        // and ends the turn on board_full. A lecture is exempt: its writes are
-        // queued and revealed with the voice, so refusing them only interrupts
-        // the continuous story (and the refusal itself prompts a new burst).
+        // Speech pacing: the tutor batches the lines for one idea at the start
+        // of the turn (the app holds each line until the voice reaches its
+        // words), then speaks the idea in one stretch. The cap below only stops
+        // a runaway "fill the whole board in silence" burst — forcing speech
+        // after every single write is what chopped the audio into stop/start
+        // bursts. A lecture is exempt: its writes are queued and revealed with
+        // the voice.
         const pace = writePaceRef.current;
         if (pace.turn !== turnSeqRef.current) {
           pace.turn = turnSeqRef.current;
@@ -2706,10 +2810,9 @@ export default function App() {
               retryable: false,
               message:
                 `PACING LIMIT: you already wrote ${pace.count} lines this turn without speaking about them — ` +
-                "the student hears SILENCE while you write, which is not allowed. " +
-                "Speak 2-3 Darija sentences RIGHT NOW about the lines already on the board " +
-                "(the WHY, referencing the exact lines), and only AFTER speaking, resend this write if it is still needed. " +
-                "Never stack more lines without speaking between them.",
+                "that is more than one idea can hold. Do not stack more lines. " +
+                "Speak the explanation of the lines already on the board as ONE continuous stretch " +
+                "(the WHY, in Darija), then stop. Only after speaking may you write the next idea.",
             },
           };
         }
@@ -3257,8 +3360,9 @@ export default function App() {
         return;
       }
       // The system instruction is fixed at session build time: remember which mode
-      // this session is being built with.
+      // and which teaching preferences this session is being built with.
       sessionIsLectureRef.current = lectureActiveRef.current;
+      sessionPrefsRef.current = teachingPreferences;
 
       ensureAudio();
       // Reconnecting to continue a cut answer keeps the already-buffered tail
@@ -3505,10 +3609,19 @@ export default function App() {
   ): boolean => {
     if (!text || !canSubmitTurn() || !sessionRef.current) return false;
 
-    // POST-LECTURE HANDOFF: the live session still carries the lecture system
-    // instruction. The first normal turn after a lecture must run on a rebuilt
-    // session, so stash it and reconnect; the handoff effect sends it on "connected".
-    if (!lectureActiveRef.current && sessionNeedsNormalRebuildRef.current) {
+    // SESSION REBUILD: the system instruction is fixed at build time, so a new
+    // level/mode must rebuild the session before the next learner message. Without
+    // this, selecting "beginner" mid-session only changed a per-turn note while the
+    // session still carried the old (often "auto") system contract. Same handoff
+    // path as the post-lecture rebuild: stash the turn, reconnect, send on "connected".
+    const sessionPrefsChanged =
+      sessionPrefsRef.current !== null &&
+      (sessionPrefsRef.current.mode !== teachingPreferences.mode ||
+        sessionPrefsRef.current.level !== teachingPreferences.level);
+    if (
+      !lectureActiveRef.current &&
+      (sessionNeedsNormalRebuildRef.current || sessionPrefsChanged)
+    ) {
       sessionNeedsNormalRebuildRef.current = false;
       pendingNormalTakenRef.current = false;
       setPendingNormalTurn({ text, action, options });
@@ -3547,6 +3660,17 @@ export default function App() {
     // learner's permission, so a full zone is still their call.
     reteachTurnRef.current =
       !options.resume && action !== "lecture" && (action === "simpler" || RETEACH_PATTERN.test(text));
+    if (reteachTurnRef.current) {
+      // Keep the text the learner just rejected. It is injected into the turn as
+      // "already heard" so the model can see exactly what it must NOT repeat.
+      // A continuation after a board-permission question keeps the original.
+      if (!options.reteachContinuation) {
+        priorExplanationRef.current =
+          lastTeachingTextRef.current || lastTranscriptRef.current;
+      }
+    } else {
+      priorExplanationRef.current = "";
+    }
     turnActionRef.current = action;
     pushAudioLog(audioLogRef.current, { at: Date.now(), kind: "turn-start", turn: turnSeqRef.current });
 
@@ -3685,7 +3809,17 @@ export default function App() {
           ? [{ text: "[VOX-TUTOR] The learner removed the previously uploaded PDF. Stop teaching from it unless they mention it again. [/VOX-TUTOR]" }]
           : []),
         ...(referenceBlock ? [{ text: referenceBlock }] : []),
-        { text: buildTutorTurnContext(teachingPreferences, reteachTurnRef.current && action === "message" ? "simpler" : action) },
+        {
+          text: buildTutorTurnContext(
+            teachingPreferences,
+            reteachTurnRef.current && action === "message" ? "simpler" : action,
+            {
+              previousExplanation: reteachTurnRef.current
+                ? priorExplanationRef.current
+                : "",
+            },
+          ),
+        },
         ...(options.boardNote ? [{ text: options.boardNote }] : []),
         ...(options.lectureContext ? [{ text: options.lectureContext }] : []),
         ...(coverageBlock ? [{ text: coverageBlock }] : []),
@@ -4276,7 +4410,7 @@ export default function App() {
             ? "السبورة تتمسحات. عاود ليا نفس النقطة بخطوات صغيرة وبطريقة أخرى، بلا ما تعاود اللي قلتي وبلا ما تطلب المسح."
             : "السبورة تتمسحات. كمّل من النقطة الجاية، بلا ما تعاود اللي قلتي وبلا ما تطلب المسح.",
           reteach ? "simpler" : "continue",
-          { boardNote },
+          { boardNote, reteachContinuation: reteach },
         )
       ) {
         return;
