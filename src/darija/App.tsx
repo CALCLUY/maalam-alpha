@@ -56,6 +56,7 @@ import {
   buildResumeHistory,
   buildTutorTurnContext,
   DEFAULT_TEACHING_PREFERENCES,
+  needsDiagramFor,
   TEACHING_SOURCES,
   type LearnerLevel,
   type TeachingPreferences,
@@ -347,11 +348,14 @@ function appendTranscript(current: string, chunk: string): string {
  * the explanation forward instead of restarting or apologising.
  */
 function buildResumePrompt(content: string): string {
-  const tail = content.trim().slice(-700);
+  const tail = content.trim().slice(-160);
   if (!tail) {
-    return "[VOX-DIRECTOR] Your previous answer was cut off by a technical hiccup before it could finish. Continue the answer from where it stopped, in Darija, as one continuous spoken explanation. Do not repeat what the learner already heard, do not restart from the beginning, do not apologise, and do not mention the interruption. [/VOX-DIRECTOR]";
+    return "[VOX-DIRECTOR] Your previous answer was cut off by a technical hiccup before it could finish. Continue the answer from where it stopped, in Darija, as one continuous spoken explanation. Do not repeat what the learner already heard, do not restart from the beginning, do not apologise, and do not mention the interruption. Your first word must be new content. [/VOX-DIRECTOR]";
   }
-  return "[VOX-DIRECTOR] Your previous answer was cut off by a technical hiccup. Continue EXACTLY from where you stopped, in Darija, as one continuous spoken explanation. Do not repeat what the learner already heard, do not restart the answer, do not apologise, and do not mention the interruption. The quoted tail is CONTEXT ONLY: do not say any part of it again — start with the very next sentence. The last words the learner heard were:\n\"…" + tail + "\"\n[/VOX-DIRECTOR]";
+  return "[VOX-DIRECTOR] Your previous answer was cut off by a technical hiccup. Continue EXACTLY from where you stopped, in Darija, as one continuous spoken explanation. " +
+    "Do NOT repeat what the learner already heard, do not restart the answer, do not apologise, and do not mention the interruption. " +
+    "The quoted words are the END of what was already spoken: do not say them, do not rephrase them, and do not summarise them. Your first spoken word must be the one that comes AFTER them. " +
+    `The last words the learner heard were: "…${tail}" [/VOX-DIRECTOR]`;
 }
 
 const DOC_ACTIONS: { id: TutorAction; label: string; prompt: string }[] = [
@@ -560,14 +564,21 @@ class MaalamPcmPlayer extends AudioWorkletProcessor {
     this.fadeSpan = Math.max(1, Math.round(sampleRate * 0.025));
     // The voice is a continuous stream, but the model delivers it in bursts and
     // sometimes pauses to think or to wait for a tool result. Playback must ride
-    // through those gaps: starting with a shallow buffer was what made every
-    // burst boundary audible as a clipped word. Prime deeply at the start, and
-    // learn the real gap after each stall so the next one is covered.
+    // through those gaps instead of stopping: restarting the buffer at every
+    // burst boundary was what the learner heard as "it stops, then continues".
+    // Prime once at the start, then keep the clock running through short gaps
+    // (silence is written into the output, the stream position does not reset),
+    // so a late packet resumes exactly where the voice left off.
     this.startReserve = Math.round(sampleRate * (opts.startReserveSeconds || 1.25));
-    this.resumeReserve = Math.round(sampleRate * (opts.resumeReserveSeconds || 0.65));
+    this.resumeReserve = Math.round(sampleRate * (opts.resumeReserveSeconds || 0.12));
     this.resumeReserveInitial = this.resumeReserve;
-    this.resumeReserveMax = Math.round(sampleRate * (opts.resumeReserveMaxSeconds || 1.8));
+    this.resumeReserveMax = Math.round(sampleRate * (opts.resumeReserveMaxSeconds || 0.2));
     this.startMaxWait = Math.round(sampleRate * (opts.startMaxWaitSeconds || 2.4));
+    // How long the player will sit in a gap (outputting silence) before it
+    // admits the stream really stopped and re-primes. Short packet gaps and
+    // tool-call pauses stay inside this window and are inaudible as a break.
+    this.gapGrace = Math.round(sampleRate * (opts.gapGraceSeconds || 0.6));
+    this.silentFrames = 0;
     this.primeStartFrame = 0;
     this.lastPushFrame = 0;
     this.lastReportFrame = 0;
@@ -583,21 +594,11 @@ class MaalamPcmPlayer extends AudioWorkletProcessor {
     if (message.type === "push") {
       const samples = message.samples;
       if (!samples || !samples.length) return;
-      // Learn the server's real burst gap: the silence between the previous
-      // packet and this one. Measuring from the underrun was wrong — playback
-      // only runs dry after the buffer is exhausted, so the measured "gap" was
-      // always shorter than the gap the voice actually had to cross.
-      if (this.lastPushFrame > 0 && this.playedOnce) {
-        const silence = (currentFrame - this.lastPushFrame) / sampleRate;
-        if (silence > 0.12) {
-          // Grow only: ordinary main-thread jitter occasionally spaces packets
-          // 150 ms apart, and letting that shrink the reserve threw away what
-          // the last real stall taught us — the next resume was shallow again.
-          this.resumeReserve = Math.min(
-            this.resumeReserveMax,
-            Math.max(this.resumeReserve, Math.round((silence + 0.35) * sampleRate)),
-          );
-        }
+      // A packet may arrive just after the gap grace expired: the stream never
+      // ended, the server was only thinking. Consume it without re-priming when
+      // the queue is still empty but the tail was continuous (playedOnce).
+      if (this.size === 0 && this.playing) {
+        this.silentFrames = 0;
       }
       this.lastPushFrame = currentFrame;
       let offset = 0;
@@ -652,6 +653,9 @@ class MaalamPcmPlayer extends AudioWorkletProcessor {
       if (typeof message.startMaxWaitSeconds === "number") {
         this.startMaxWait = Math.max(1, Math.round(sampleRate * message.startMaxWaitSeconds));
       }
+      if (typeof message.gapGraceSeconds === "number") {
+        this.gapGrace = Math.max(1, Math.round(sampleRate * message.gapGraceSeconds));
+      }
       return;
     }
     if (message.type === "reset") {
@@ -665,6 +669,7 @@ class MaalamPcmPlayer extends AudioWorkletProcessor {
       this.lastPushFrame = 0;
       this.resumeReserve = this.resumeReserveInitial;
       this.fade = 0;
+      this.silentFrames = 0;
       this.played = 0;
       this.underruns = 0;
       this.dropped = 0;
@@ -712,22 +717,26 @@ class MaalamPcmPlayer extends AudioWorkletProcessor {
       this.readIndex = (this.readIndex + 1) % this.capacity;
       this.size -= 1;
       if (this.fade < 1) this.fade = Math.min(1, this.fade + this.fadeStep);
-      const tail = this.size < this.fadeSpan ? this.size / this.fadeSpan : 1;
-      output[index] = sample * this.fade * tail;
+      output[index] = sample * this.fade;
       index += 1;
       this.played += 1;
     }
 
-    if (this.size === 0) {
-      // The fade above lands the last word softly, and the next start waits for
-      // a real buffer again. Resuming instantly into an empty queue just moves
-      // the chop: the input arrives only as fast as the voice, so it runs dry
-      // again a few hundred milliseconds later, over and over.
-      this.playing = false;
-      this.priming = false;
-      this.fade = 0;
-      this.underruns += 1;
-      this.port.postMessage({ type: "underrun", stream: this.stream, played: this.played });
+    if (this.size === 0 && this.playing) {
+      // Hold the stream position through a short generation gap instead of
+      // stopping and re-priming. The learner hears a natural pause, never a
+      // clipped word or a restart; the next packet joins the same timeline.
+      this.silentFrames += output.length - index;
+      if (this.silentFrames >= this.gapGrace) {
+        this.playing = false;
+        this.priming = false;
+        this.fade = 0;
+        this.silentFrames = 0;
+        this.underruns += 1;
+        this.port.postMessage({ type: "underrun", stream: this.stream, played: this.played });
+      }
+    } else if (this.size > 0) {
+      this.silentFrames = 0;
     }
     this.report();
     return true;
@@ -1342,6 +1351,12 @@ export default function App() {
   const lastSpeechNudgeSeqRef = useRef(-1);
   /** The user turn a "you spoke but wrote nothing" nudge was already sent for. */
   const lastBoardNudgeSeqRef = useRef(-1);
+  /** Diagrams actually written on the current turn. */
+  const turnDiagramsRef = useRef(0);
+  /** True while the current topic is spatial/structural and needs a drawing. */
+  const diagramExpectedRef = useRef(false);
+  /** The user turn the "add the missing diagram" repair was sent for. */
+  const lastDiagramNudgeSeqRef = useRef(-1);
   /** The action that opened the current turn (decides whether a board write is expected). */
   const turnActionRef = useRef<TutorAction>("message");
   useEffect(() => {
@@ -1663,15 +1678,17 @@ export default function App() {
         ...(lecture
           ? {
               startReserveSeconds: 2.2,
-              resumeReserveSeconds: 0.7,
-              resumeReserveMaxSeconds: 1.3,
+              resumeReserveSeconds: 0.2,
+              resumeReserveMaxSeconds: 0.35,
               startMaxWaitSeconds: 3.4,
+              gapGraceSeconds: 1.5,
             }
           : {
               startReserveSeconds: 1.25,
-              resumeReserveSeconds: 0.65,
-              resumeReserveMaxSeconds: 1.8,
+              resumeReserveSeconds: 0.12,
+              resumeReserveMaxSeconds: 0.2,
               startMaxWaitSeconds: 2.4,
+              gapGraceSeconds: 0.7,
             }),
       });
     } catch {
@@ -1697,9 +1714,10 @@ export default function App() {
         processorOptions: lectureActiveRef.current
           ? {
               startReserveSeconds: 2.2,
-              resumeReserveSeconds: 0.7,
-              resumeReserveMaxSeconds: 1.3,
+              resumeReserveSeconds: 0.2,
+              resumeReserveMaxSeconds: 0.35,
               startMaxWaitSeconds: 3.4,
+              gapGraceSeconds: 1.5,
             }
           : undefined,
       });
@@ -2432,6 +2450,18 @@ export default function App() {
         ? repeatedExplanationRatio(priorExplanationRef.current, text)
         : 0;
 
+    // The spatial/structural idea was explained with words only: the learner
+    // hears a description of something they cannot see. One repair per turn
+    // adds ONLY the drawing (no repeated explanation, no extra speech burst).
+    const diagramMissing =
+      !interrupted &&
+      !lectureActiveRef.current &&
+      Boolean(text) &&
+      text.length >= 80 &&
+      diagramExpectedRef.current &&
+      turnDiagramsRef.current === 0 &&
+      lastDiagramNudgeSeqRef.current !== turnSeqRef.current;
+
     // The turn did things on the board but produced ZERO speech: the student
     // heard complete silence while writing appeared. Force one spoken catch-up
     // turn (at most one nudge per learner turn, so this can never loop).
@@ -2441,6 +2471,7 @@ export default function App() {
       !text &&
       audioChunks.length === 0 &&
       repeatedReteach < 0.35 &&
+      !diagramMissing &&
       (turnWritesRef.current > 0 || turnToolsRef.current > 0) &&
       lastSpeechNudgeSeqRef.current !== turnSeqRef.current &&
       sessionRef.current
@@ -2452,7 +2483,7 @@ export default function App() {
         (wrote > 0
           ? `wrote ${wrote} line(s) on the board but produced ZERO speech — the student heard complete silence while writing appeared. Speak NOW in Darija, in ONE audio stretch: explain each line you just wrote (the WHY behind it, referencing the exact lines).`
           : "used board tools but produced ZERO speech — the student heard complete silence. Speak NOW in Darija: say what you just put on the board and why, 2-4 sentences, in ONE audio stretch.") +
-        " Do not write anything else before speaking. [/VOX-DIRECTOR]";
+        " Do not write anything else before speaking, and never mention silence, audio or technical problems. [/VOX-DIRECTOR]";
       try {
         lastClientSendAtRef.current = Date.now();
         sessionRef.current.sendClientContent({
@@ -2474,6 +2505,7 @@ export default function App() {
       text.length >= 120 &&
       turnWritesRef.current === 0 &&
       repeatedReteach < 0.35 &&
+      !diagramMissing &&
       BOARD_EXPECTED_ACTIONS.has(turnActionRef.current) &&
       lastBoardNudgeSeqRef.current !== turnSeqRef.current &&
       sessionRef.current
@@ -2485,6 +2517,32 @@ export default function App() {
         "Write ONLY the reference for the idea you just explained, compactly: one heading plus 1-3 short lines (formal French, exam notation), " +
         "circle or arrow the one symbol/word that carries the point, and add one concrete example in the example zone if the idea needs it. " +
         "Output no audio at all: board writes only, then stop. [/VOX-DIRECTOR]";
+      try {
+        lastClientSendAtRef.current = Date.now();
+        sessionRef.current.sendClientContent({
+          turns: [{ role: "user", parts: [{ text: nudge }] }],
+          turnComplete: true,
+        });
+      } catch {
+        // The session is gone; nothing to resume.
+      }
+    }
+
+    // Missing diagram repair. It runs after the text-only repairs so a turn is
+    // corrected once, and it keeps the response write-only: the explanation is
+    // already spoken, only the drawing is missing.
+    if (diagramMissing && repeatedReteach < 0.35 && sessionRef.current) {
+      lastDiagramNudgeSeqRef.current = turnSeqRef.current;
+      // The repair is supposed to be silent; never answer it with a "you wrote
+      // but said nothing" speech burst.
+      lastSpeechNudgeSeqRef.current = turnSeqRef.current;
+      const nudge =
+        "[VOX-DIRECTOR] You just explained this idea with words only, but the idea is spatial/structural: the learner is hearing a description of something they cannot see. " +
+        "Do NOT repeat the explanation, do NOT apologise, and produce NO audio in this response. " +
+        "Add ONLY the missing drawing now: board_write(zone='middle', type='svg', content='<svg viewBox=\"0 0 520 200\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">…</svg>'). " +
+        "Use 6-14 elements (rect/circle/line/path + short French <text fill=\"currentColor\" stroke=\"none\" font-size=\"14\"> labels) that show the very object you just described; no <style>, no width/height, labels inside a 20 px margin. " +
+        "If the idea is a process, draw boxes + arrows; if it is geometry/physics, draw the figure with labelled sides/forces; if it is a graph, draw the axes and the curve. " +
+        "One heading is optional; the drawing is the content. Then stop. [/VOX-DIRECTOR]";
       try {
         lastClientSendAtRef.current = Date.now();
         sessionRef.current.sendClientContent({
@@ -2992,7 +3050,7 @@ export default function App() {
               },
             };
           }
-        } else if (hasArabicScript([formalArgs.content, formalArgs.items, formalArgs.term, formalArgs.title])) {
+        } else if (formalArgs.type !== "svg" && hasArabicScript([formalArgs.content, formalArgs.items, formalArgs.term, formalArgs.title])) {
           // Large formal zone is an exam-style French/math surface, never Arabic prose.
           return {
             id: call.id,
@@ -3026,6 +3084,11 @@ export default function App() {
         }
         pace.count += 1;
         pace.transcriptLen = audibleCharCount();
+        if (prepared.block.type === "svg") {
+          turnDiagramsRef.current += 1;
+          // The topic got its drawing: later turns do not need the repair.
+          diagramExpectedRef.current = false;
+        }
         // Every block waits for speech progression — including the first. This
         // prevents a whole block/definition from appearing while Vox is still silent.
         enqueueReveal(prepared.block);
@@ -3681,6 +3744,16 @@ export default function App() {
     turnSeqRef.current += 1;
     turnWritesRef.current = 0;
     turnToolsRef.current = 0;
+    turnDiagramsRef.current = 0;
+    // A diagram expectation belongs to the TOPIC, not to one message: a
+    // follow-up or a "continue" keeps needing the drawing it never got. A new
+    // learner question re-decides it.
+    if (
+      !options.resume &&
+      (action === "message" || action === "doc_start" || action === "doc_lesson" || action === "practice")
+    ) {
+      diagramExpectedRef.current = needsDiagramFor(text);
+    }
     lastToolResponseAtRef.current = 0;
     // Re-teach turn: the learner says they are lost or asks to repeat. It gets
     // the re-teach instructions (different representation, smaller step) instead
@@ -3845,6 +3918,7 @@ export default function App() {
               previousExplanation: reteachTurnRef.current
                 ? priorExplanationRef.current
                 : "",
+              diagramRequired: diagramExpectedRef.current,
             },
           ),
         },
@@ -3891,8 +3965,12 @@ export default function App() {
       // Auto-continue segments and automatic continuations have already received
       // their previous turn's completion, so no stale packet can still be in
       // flight: do not clip the first syllables of the new audio. Only a real
-      // learner barge-in needs a short guard against the cancelled answer's tail.
-      staleAudioUntilRef.current = options.preservePlayback || options.resume ? 0 : 150;
+      // learner barge-in needs a guard against the cancelled answer's tail: 150 ms
+      // was shorter than the server's cancellation latency, so a late old packet
+      // could be appended to the NEW answer and the learner heard the previous
+      // sentence after the new one had started. The first `interrupted` marker
+      // clears this guard, and a fresh generation needs longer than this anyway.
+      staleAudioUntilRef.current = options.preservePlayback || options.resume ? 0 : 700;
       sessionRef.current.sendClientContent({ turns: [{ role: "user", parts }], turnComplete: true });
       documentRemovedRef.current = false;
       return true;

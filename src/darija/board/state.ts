@@ -7,7 +7,7 @@
 import { fixSentenceSpacing } from "./spacing";
 import type { BoardBlock, BoardBlockType, BoardZone, ChalkColor } from "./types";
 
-const MAX_CONTENT_CHARS = 4_000;
+const MAX_CONTENT_CHARS = 8_000;
 // Budgets are in rendered "lines". Sized for the 1.5x chalk at a fixed 20:9 board,
 // so a zone wipes itself right when it genuinely runs out of space.
 const ZONE_INK_BUDGET: Record<BoardZone, number> = { left: 0, middle: 12, right: 10 };
@@ -91,10 +91,13 @@ export function makeBoardBlock(args: BoardWriteArgs): BoardBlock {
 
   // Safety net: Arabic content must NEVER render as a formal/boxed block in the
   // large zone. If it slips past the tool-level rejection, reroute it to the
-  // right zone and render it as a plain (unframed) example instead.
+  // right zone and render it as a plain (unframed) example instead. An SVG is
+  // exempt: its labels are part of a drawing (not prose), and rerouting it
+  // would turn the diagram into an example and make it disappear.
   if (
     zone === "middle" &&
     type !== "question" &&
+    type !== "svg" &&
     ARABIC_SCRIPT.test(`${content} ${items?.join(" ") ?? ""} ${term ?? ""}`)
   ) {
     zone = "right";

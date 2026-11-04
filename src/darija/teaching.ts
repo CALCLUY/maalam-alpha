@@ -217,6 +217,38 @@ TEMPLATES (adapt the numbers; do not copy blindly):
 Put every label and arrow INSIDE the SVG (board_annotate targets text blocks, not SVG
 shapes). In speech, point at one part ("هاد الضلع…", "هاد السهم…") so eyes and ears meet.`;
 
+/**
+ * Detects a question whose answer is naturally a drawing: geometry, physics with
+ * forces/circuits, biology/geology schemas, graphs, and explicit flow/process
+ * questions. Used to make the diagram requirement explicit for that turn and to
+ * repair a turn that explained such an idea with words only.
+ */
+const DIAGRAM_SIGNALS: RegExp[] = [
+  /\b(triangle|quadrilat\w*|parallélogramme|rectangle|carré|cercle|disque|droite|segment|angle|vecteur|repère|axes?|courbe|parabole|hyperbole|graphique|schéma|figure|cylindre|cône|sphère|pyramide|symétrie|rotation|translation|projection|tangente|sécante|médiatrice|bissectrice|médiane|fonction|représentation graphique)\b/i,
+  /\b(force|forces|vitesse|accélération|trajectoire|circuit|résistance|tension|intensité|lentille|rayon|onde|champ|aimant|poids|réaction|frottement|énergie mécanique|mouvement)\b/i,
+  /\b(cellule|cellulaire|noyau|membrane|chromosome|ADN|ARN|organe|mitose|méiose|photosynthèse|cycle cellulaire|plaque|volcan|séisme|roche|coupe|écorce|manteau)\b/i,
+  /\b(organigramme|algorithme|flowchart|processus|cycle de|diagramme|schématise|schématiser|représente graphiquement)\b/i,
+  /(مثلث|دائرة|مستقيم|زاوية|متجهة|قوة|دارة|خلية|خلوي|انقسام|منحنى|محور|رسم بياني|مخطط|شكل هندسي|هندسة|دورة|ضلع|سهم|رسم)/i,
+];
+
+export function needsDiagramFor(text: string): boolean {
+  if (!text.trim()) return false;
+  return DIAGRAM_SIGNALS.some((pattern) => pattern.test(text));
+}
+
+const DIAGRAM_REQUIRED = `[THIS IDEA NEEDS A DRAWING — do it in this turn]
+The learner's question is about a spatial, structural or procedural object. Explaining it
+with words only leaves them nothing to look at, so this turn is INCOMPLETE without a
+diagram.
+- After the heading, call board_write(zone="middle", type="svg", content="<svg …>…</svg>")
+  BEFORE the explanation lines, using the recipe below (viewBox 0 0 520 200, chalk
+  defaults, 6-14 elements, short French labels inside the drawing).
+- Then speak what the drawing shows: point at one part, name what it represents, and
+  connect it to the step you are teaching. Never read the SVG code aloud.
+- Only skip it if the idea has no spatial/structural form at all (a pure calculation on
+  symbols). "It takes more time" is not a reason to skip: the drawing IS the explanation.`;
+
+
 // This is an instructional policy, not model fine-tuning or a validated AI curriculum.
 const TEACHING_PROTOCOL = `
 === EVIDENCE-INFORMED TEACHING: GUIDED MASTERY ===
@@ -633,6 +665,8 @@ export type TutorTurnOptions = {
    * Provided only on a re-teach turn: the model must not reuse it.
    */
   previousExplanation?: string;
+  /** The learner's question is spatial/structural: a diagram is mandatory. */
+  diagramRequired?: boolean;
 };
 
 export function buildTutorTurnContext(
@@ -708,13 +742,16 @@ This response covers ONE teachable idea or ONE problem step only. Put its board 
 [/PREVIOUS EXPLANATION]
 `
     : "";
+  const diagramRequired = !isLecture && options.diagramRequired
+    ? `\n${DIAGRAM_REQUIRED}\n`
+    : "";
 
   return `[VOX-TUTOR]
 ${JSON.stringify({ ...preferences, action })}
 ${LEVEL_INSTRUCTIONS[preferences.level]}
 ${ACTION_INSTRUCTIONS[action]}
 ${turnInstruction}
-${beginnerStart}${previousExplanation}
+${beginnerStart}${previousExplanation}${diagramRequired}
 [BOARD-FIRST FOR THIS TURN — hard requirements, checked before you finish]
 - Write at least ONE board block this turn (heading + one short reference line), except
   for a purely conversational turn (greeting, "yes/no", "shall I erase?"). Teaching

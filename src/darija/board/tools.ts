@@ -39,7 +39,7 @@ export const BOARD_WRITE_TOOL: FunctionDeclaration = {
       content: {
         type: Type.STRING,
         description:
-          "Formal French text, raw LaTeX, SVG markup, or the exact Darija words already spoken for an example. Math is NEVER typed as plain characters: in type=formula/latex (and a takeaway that is only an equation) write raw LaTeX without $; inside prose (definition, text, question, objective items, example body) wrap EVERY math expression in $...$, e.g. 'un nombre de la forme $z = a + ib$ où $i^2 = -1$'.",
+          "Formal French text, raw LaTeX, SVG markup, or the exact Darija words already spoken for an example. Math is NEVER typed as plain characters: in type=formula/latex (and a takeaway that is only an equation) write raw LaTeX without $; inside prose (definition, text, question, objective items, example body) wrap EVERY math expression in $...$, e.g. 'un nombre de la forme $z = a + ib$ où $i^2 = -1$'. For type='svg', content is ONE complete drawing: <svg viewBox=\"0 0 520 200\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">…</svg>, labels as <text fill=\"currentColor\" stroke=\"none\" font-size=\"14\">Mot</text>.",
       },
       items: {
         type: Type.ARRAY,

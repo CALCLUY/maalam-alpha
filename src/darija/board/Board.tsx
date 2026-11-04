@@ -998,7 +998,7 @@ function BoardBlockViewComponent({
     const svg = block.content ? sanitizeSvgMarkup(block.content) : null;
     body = svg ? (
       <div
-        className={`board-svg ${isWriting ? "chalk-hand-line is-ltr" : ""}`}
+        className={`board-svg ${isWriting ? "chalk-svg-write" : ""}`}
         style={isWriting ? ({ animationDuration: "0.95s" } as CSSProperties) : undefined}
         onAnimationEnd={isWriting ? finishWriting : undefined}
         dangerouslySetInnerHTML={{ __html: svg }}

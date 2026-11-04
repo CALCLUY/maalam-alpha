@@ -46,14 +46,33 @@ function sanitizeElement(node: Element): void {
       node.removeAttribute(attr.name);
     }
   });
+  // A label without an explicit size inherits the browser default (16 SVG
+  // units) and can vanish when the diagram is scaled down on a phone. Give
+  // every text node a legible chalk size unless the model chose one.
+  if (tag === "text" && !node.getAttribute("font-size")) {
+    node.setAttribute("font-size", "14");
+  }
   Array.from(node.children).forEach((child) => sanitizeElement(child));
+}
+
+/** A model sometimes sends only the shapes or forgets the closing tag. Both are
+ *  repaired here instead of rejecting a diagram the learner needs. */
+function extractSvgSource(raw: string): string {
+  const trimmed = raw.trim();
+  const match = trimmed.match(/<svg[\s\S]*?<\/svg>/i);
+  if (match) return match[0];
+  if (/^<svg[\s>]/i.test(trimmed)) {
+    return trimmed.endsWith("</svg>") ? trimmed : `${trimmed}</svg>`;
+  }
+  const hasShape = /<(g|path|line|polyline|polygon|rect|circle|ellipse|text|tspan)[\s>]/i.test(trimmed);
+  if (hasShape) return `<svg viewBox="0 0 520 200">${trimmed}</svg>`;
+  return "";
 }
 
 /** Returns sanitized, serialized SVG markup, or null if the input isn't usable. */
 export function sanitizeSvgMarkup(raw: string): string | null {
   if (typeof window === "undefined" || typeof DOMParser === "undefined") return null;
-  const match = raw.match(/<svg[\s\S]*?<\/svg>/i);
-  const source = (match ? match[0] : raw.trim().startsWith("<svg") ? raw : "").trim();
+  const source = extractSvgSource(raw);
   if (!source) return null;
   try {
     const doc = new DOMParser().parseFromString(source, "image/svg+xml");

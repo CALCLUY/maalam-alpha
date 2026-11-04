@@ -1707,8 +1707,31 @@ input[type="radio"]:focus-visible {
 .board-svg svg {
   width: 100%;
   height: auto;
-  max-height: 220px;
+  max-height: 240px;
   color: inherit;
+}
+
+/* A diagram draws itself like chalk, but it must NOT use `.chalk-hand-line`:
+   that class is `width: fit-content; white-space: nowrap`, so the SVG started
+   at its intrinsic width and jumped to full width when the animation ended
+   (the learner saw it "small first, then scaling"). This keeps the full width
+   from the first frame and only wipes the drawing in horizontally. */
+.board-svg.chalk-svg-write {
+  width: 100%;
+  max-width: 100%;
+  white-space: normal;
+  animation-name: chalk-svg-reveal;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+@keyframes chalk-svg-reveal {
+  from {
+    clip-path: inset(-2% 100% -2% -2%);
+  }
+  to {
+    clip-path: inset(-2% -2% -2% -2%);
+  }
 }
 
 @media (max-width: 720px) {
@@ -2192,7 +2215,7 @@ input[type="radio"]:focus-visible {
 }
 
 .board-svg svg {
-  max-height: 20cqw;
+  max-height: min(240px, 30cqw);
 }
 
 /* ------------------------------------------------------------------------ */
