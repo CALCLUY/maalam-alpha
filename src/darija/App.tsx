@@ -438,8 +438,10 @@ const LECTURE_HARD_STOP_GRACE_MS = 15_000;
  *  app rebuilds the session. Tool-only segments never count: they are normal. */
 const LECTURE_EMPTY_SEGMENTS_BEFORE_REBUILD = 5;
 /** Keep enough audio hashes to catch a whole re-sent sentence after a tool call.
- *  Twelve packets covered barely a second; a sentence is several times longer. */
-const RECENT_AUDIO_WINDOW = 96;
+ *  Twelve packets covered barely a second; a sentence is several times longer.
+ *  A tool-call round trip can re-send an earlier phrase many seconds later, so
+ *  the window covers roughly half a minute of speech. */
+const RECENT_AUDIO_WINDOW = 400;
 
 /** Debug ring buffer of what the Live stream actually sends (mime type, cadence,
  *  underruns). Readable as window.__maalamAudioLog while the app runs. */
